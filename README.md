@@ -15,7 +15,7 @@
 
 ## Why mAIke?
 
-- **Multi-provider, swap on the fly** — Anthropic, OpenAI, Gemini (direct API or Vertex), and any Ollama model. Switch with `/model` mid-conversation.
+- **Multi-provider** — Anthropic, OpenAI, Gemini (direct API or Vertex), and any Ollama model. Configured per session via `--provider` / `--model`.
 - **Pre-call cost projection** — every API call is priced *before* it fires. Sessions abort gracefully at 95% of your budget instead of blowing past it.
 - **Tool risk gating** — every tool is tiered `READ → WRITE → EXECUTE → DESTRUCTIVE`. Writes need a git checkpoint; execution needs inline approval.
 - **Read-before-edit enforcement** — the Edit tool refuses to run on a file the agent hasn't Read this turn, killing a whole class of cascading edit bugs.
@@ -119,17 +119,17 @@ maike --yes --verbose                       # auto-approve + inline traces
 
 | Command | Purpose |
 |---------|---------|
-| `/help` | List commands |
-| `/cost`, `/budget` | Cost breakdown / remaining budget |
-| `/model` | Switch model mid-session |
-| `/history`, `/new` | Show / reset the current thread |
-| `/status`, `/tasks`, `/context` | Session state, background tasks, token usage |
+| `/help` | Show help and keybindings |
+| `/cost` | Session cost and tokens |
+| `/status` | Provider, model, budget, workspace |
+| `/new` | Start a new conversation thread |
+| `/clear` | Clear the screen |
 | `/agent`, `/create-agent` | List / create custom agents |
 | `/team`, `/create-team` | List / create agent teams |
-| `/advisor` | Show advisor status or ask the advisor a question |
+| `/skill` | List, load, or install skills |
+| `/plugin` | List / install / enable / disable plugins |
 | `/worktree` | Manage git worktrees |
-| `/plugin`, `/skill`, `/mcp`, `/hook` | Manage extensibility surfaces |
-| `/quit`, `/exit` | Exit |
+| `/quit` | Exit (aliases: `/exit`, `/q`) |
 
 ---
 
