@@ -9,11 +9,20 @@
 
 <p align="center"><b>A local-first ReAct coding agent with strict tool gating, pre-call cost projection, and persistent project memory.</b></p>
 
-<p align="center">Runs Claude, GPT, Gemini, or a local Ollama model — switchable mid-session. Your code, sessions, cost ledger, and memory never leave your machine.</p>
+<p align="center">Runs Claude, GPT, Gemini, or a local Ollama model. Your code, sessions, cost ledger, and memory never leave your machine.</p>
+
+<p align="center">
+  <!-- Replace with an asciinema cast (.svg) or screenshot. Capture: launch → @-mention a file → tool call streams → /cost panel. -->
+  <img src="docs/images/tui-demo.gif" alt="mAIke TUI in use" width="780">
+</p>
 
 ---
 
-## Why mAIke?
+## Design
+
+mAIke is built around three convictions: **cost should be visible and bounded *before* each call**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. Everything else — multi-provider support, sub-agents, the advisor pattern, the eval harness — falls out of those three priorities. The agent runs locally; the only thing leaving your machine is the LLM API call itself.
+
+### Features
 
 - **Multi-provider** — Anthropic, OpenAI, Gemini (direct API or Vertex), and any Ollama model. Configured per session via `--provider` / `--model`.
 - **Pre-call cost projection** — every API call is priced *before* it fires. Sessions abort gracefully at 95% of your budget instead of blowing past it.
@@ -26,8 +35,35 @@
 - **Threads & worktrees** — multiple concurrent conversations per workspace, isolated git worktrees for branch work.
 - **Extensible** — Skills, Plugins, MCP servers, and LSP language servers as first-class surfaces.
 
+## Results
+
+Internal SWE-bench eval, April 2026 — 12 mixed Verified+Lite instances, $2.00 budget per trial.
+
+| Config | Solved | Solved + partial | Total cost |
+|--------|--------|------------------|------------|
+| Gemini 3.1 Flash Lite (alone) | 3/12 (25%) | 8/12 (67%) | $0.96 |
+| Flash Lite + Gemini 3.1 Pro **advisor** | **4/12 (33%)** | **11/12 (92%)** | **$0.45** |
+| Gemini 3.1 Pro (alone) | 4/12 (33%) | 10/12 (83%) | $18.14 |
+
+The headline result is the second row: a cheap executor paired with a frontier-model advisor matches the solo-Pro solve rate at ~2.5% of the cost, with a higher partial-solve rate.
+
+**Important caveats — please read before citing these numbers:**
+
+- Verification is a **3-tier proxy** (syntax parse + gold-file overlap + semantic similarity check), **not** the official SWE-bench Docker harness running `FAIL_TO_PASS` tests. Real harness scores would likely be lower. We did not stand up venvs for the 12 repositories.
+- **Small sample size** (12 instances). Not statistically comparable to leaderboard runs on the full 300-instance Lite set.
+- Task prompts include a "likely files" hint derived from the gold patch — easier than a cold read of the issue.
+- Pro-solo hit the $2 budget on 5/12 trials and returned zero edits on 2.
+
+To reproduce on the full 300 instances with the official harness:
+
+```bash
+maike swe-bench --variant lite                 # writes predictions.jsonl
+# then run the official SWE-bench Docker harness against predictions.jsonl
+```
+
 ## Table of Contents
 
+- [Results](#results)
 - [Quick Start](#quick-start)
 - [Providers & Models](#providers--models)
 - [Interactive Mode](#interactive-mode)
