@@ -11,6 +11,10 @@
 
 <p align="center">Runs Claude, GPT, Gemini, or a local Ollama model. Your code, sessions, cost ledger, and memory never leave your machine.</p>
 
+<p align="center">
+  <img src="docs/images/tui-demo.gif" alt="mAIke TUI: launch → ask for an Ollama agentic app → Write app.py → Bash run → final response" width="900">
+</p>
+
 ---
 
 ## Design
