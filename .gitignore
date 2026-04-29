@@ -168,8 +168,6 @@ maike/smoke/real_world_results/
 
 *.zip
 
-docs/*
-
 .*
 
 eval/*

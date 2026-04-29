@@ -11,16 +11,11 @@
 
 <p align="center">Runs Claude, GPT, Gemini, or a local Ollama model. Your code, sessions, cost ledger, and memory never leave your machine.</p>
 
-<p align="center">
-  <!-- Replace with an asciinema cast (.svg) or screenshot. Capture: launch → @-mention a file → tool call streams → /cost panel. -->
-  <img src="docs/images/tui-demo.gif" alt="mAIke TUI in use" width="780">
-</p>
-
 ---
 
 ## Design
 
-mAIke is built around three convictions: **cost should be visible and bounded *before* each call**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. Everything else — multi-provider support, sub-agents, the advisor pattern, the eval harness — falls out of those three priorities. The agent runs locally; the only thing leaving your machine is the LLM API call itself.
+mAIke is built around three convictions: **every API call should be priced *before* it fires**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. Unlike cloud-hosted coding agents that ship your code to a service, or single-provider wrappers around one model API, mAIke runs locally and treats provider choice as a per-session decision. Everything else — sub-agents, the advisor pattern, the eval harness — falls out of those priorities.
 
 ### Features
 
@@ -35,35 +30,35 @@ mAIke is built around three convictions: **cost should be visible and bounded *b
 - **Threads & worktrees** — multiple concurrent conversations per workspace, isolated git worktrees for branch work.
 - **Extensible** — Skills, Plugins, MCP servers, and LSP language servers as first-class surfaces.
 
-## Results
+## Internal Eval — Advisor Pattern
 
-Internal SWE-bench eval, April 2026 — 12 mixed Verified+Lite instances, $2.00 budget per trial.
+**This is not a SWE-bench score.** It's a 12-instance internal smoke test designed to validate one specific claim: that pairing a cheap executor with a frontier-model advisor produces a meaningful uplift over the cheap executor alone, at a fraction of the cost of running the frontier model solo.
 
-| Config | Solved | Solved + partial | Total cost |
-|--------|--------|------------------|------------|
-| Gemini 3.1 Flash Lite (alone) | 3/12 (25%) | 8/12 (67%) | $0.96 |
-| Flash Lite + Gemini 3.1 Pro **advisor** | **4/12 (33%)** | **11/12 (92%)** | **$0.45** |
-| Gemini 3.1 Pro (alone) | 4/12 (33%) | 10/12 (83%) | $18.14 |
+Conditions: 12 mixed Verified+Lite instances, $2.00 budget per trial, April 2026. Verification is a 3-tier proxy (syntax parse + gold-file overlap + semantic similarity), **not** the official SWE-bench Docker harness running `FAIL_TO_PASS` tests. Task prompts include a "likely files" hint derived from the gold patch — this isolates edit quality from retrieval, but means these numbers are not comparable to cold-start runs.
 
-The headline result is the second row: a cheap executor paired with a frontier-model advisor matches the solo-Pro solve rate at ~2.5% of the cost, with a higher partial-solve rate.
+| Config | Solved* | Solved + partial* | Total cost |
+|--------|---------|-------------------|------------|
+| Flash Lite (alone) | 3/12 | 8/12 | $0.96 |
+| Flash Lite + Pro **advisor** | **4/12** | **11/12** | **$0.45** |
+| Pro (alone) | 4/12 | 10/12 | $18.14 |
 
-**Important caveats — please read before citing these numbers:**
+\*"Solved" = passes all three proxy verifier tiers. "Partial" = passes syntax and overlap but not semantic similarity. Neither maps to official SWE-bench scoring.
 
-- Verification is a **3-tier proxy** (syntax parse + gold-file overlap + semantic similarity check), **not** the official SWE-bench Docker harness running `FAIL_TO_PASS` tests. Real harness scores would likely be lower. We did not stand up venvs for the 12 repositories.
-- **Small sample size** (12 instances). Not statistically comparable to leaderboard runs on the full 300-instance Lite set.
-- Task prompts include a "likely files" hint derived from the gold patch — easier than a cold read of the issue.
-- Pro-solo hit the $2 budget on 5/12 trials and returned zero edits on 2.
+The takeaway: under these conditions, the advisor pattern matched solo-Pro's solve rate at ~2.5% of the cost. Pro-solo also hit the budget cap on 5/12 trials and returned zero edits on 2.
 
-To reproduce on the full 300 instances with the official harness:
+A real SWE-bench Lite run with the official harness is on the roadmap. To reproduce on the full 300 instances yourself:
 
 ```bash
 maike swe-bench --variant lite                 # writes predictions.jsonl
 # then run the official SWE-bench Docker harness against predictions.jsonl
 ```
 
+## Status
+
+mAIke is **alpha**. The CLI surface is stabilizing but expect breaking changes. Bug reports welcome via GitHub Issues — see [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+
 ## Table of Contents
 
-- [Results](#results)
 - [Quick Start](#quick-start)
 - [Providers & Models](#providers--models)
 - [Interactive Mode](#interactive-mode)
@@ -77,7 +72,7 @@ maike swe-bench --variant lite                 # writes predictions.jsonl
 - [Extensibility](#extensibility)
 - [Evaluation](#evaluation)
 - [Configuration](#configuration)
-- [Architecture at a Glance](#architecture-at-a-glance)
+- [Architecture](#architecture)
 - [CLI Reference](#cli-reference)
 
 ---
@@ -86,6 +81,8 @@ maike swe-bench --variant lite                 # writes predictions.jsonl
 
 ```bash
 # Python 3.11+
+git clone https://github.com/lkshay/mAIke-oss.git
+cd mAIke-oss
 pip install -e .
 
 # Set keys interactively (writes ~/.config/maike/.env)
@@ -212,7 +209,7 @@ Every built-in tool carries a `RiskLevel`. The `SafetyLayer` intercepts every to
 | **EXECUTE** | `Bash` | requires checkpoint + inline approval (skipped with `--yes`) |
 | **DESTRUCTIVE** | `rm -rf`, drop-table style | always prompts; pattern-matched in `safety/rules.py` |
 
-**Read-before-edit:** the Edit tool refuses to run on a file the agent hasn't Read in this turn. After a successful edit the read state clears — the next Edit on that file requires a fresh Read. This kills the cascading-edit bug pattern where edit #2 operates on stale content.
+**Read-before-edit:** the Edit tool refuses to run on a file the agent hasn't Read in this turn. The bug class this prevents: an agent reads a file, edits it, then issues a second edit based on its stale recollection of the original contents — silently corrupting the second edit because the line numbers, surrounding context, or assumed state no longer match. After every successful edit the read state clears, forcing a fresh read before the next edit on that file.
 
 **Bash idle timeout:** commands are killed if they produce no output for `idle_timeout` seconds (floor 10s). Errors include actionable recovery hints (`use timeout_class="long"` or `background=true`).
 
@@ -220,13 +217,15 @@ Every built-in tool carries a `RiskLevel`. The `SafetyLayer` intercepts every to
 
 ## Auto-Memory
 
-mAIke distills durable project knowledge at the end of every session — synchronously, no LLM call, immune to TUI cancellation. Three memory types land in `<workspace>/.maike/memories/`:
+At session end, mAIke distills durable project knowledge into Markdown files under `<workspace>/.maike/memories/`. The distillation is synchronous and deterministic — no LLM call, no async work — which means it survives TUI cancellation, network failure, and budget exhaustion. Three memory types:
 
-- **`project_overview`** — purpose, tech stack, key modules
-- **`key_decisions`** — architectural choices the agent made or learned
-- **`pitfalls`** — errors encountered and how they were resolved
+- **`project_overview.md`** — purpose, tech stack, key modules. Extracted from the session's tool-call history (which files were read, which commands ran, what the test framework is).
+- **`key_decisions.md`** — architectural choices the agent made or surfaced from the codebase, parsed from the agent's own milestone messages.
+- **`pitfalls.md`** — errors encountered and the fix that resolved them, captured from the `RepeatedFailureTracker`'s 13-category error classifier.
 
-The next session reads `MEMORY.md` + topic files at startup and injects them as a high-priority context block. No re-exploration of the same files. No re-discovery of the same pitfalls.
+Each memory is a Markdown file with YAML frontmatter (`name`, `description`, `type`, `created_at`). On collision, a counter is appended rather than overwriting — older memories are preserved verbatim. A `MEMORY.md` index file lists all entries with their descriptions for quick scanning.
+
+The next session reads `MEMORY.md` plus the topic files at startup (capped at 8K tokens total, 2K per file) and injects them as a `<maike-memory priority="high" source="auto-memory">` context block before the first user message. The result: no re-exploration of the same files, no re-discovery of the same pitfalls, no repeated wrong turns across sessions.
 
 ---
 
@@ -343,22 +342,18 @@ MAIKE.md is yours to edit — mAIke reads it but never writes to it.
 
 ---
 
-## Architecture at a Glance
+## Architecture
 
 ```
-CLI (cli.py)
-  → Orchestrator (orchestrator/)         pipeline · state machine · partition fan-out · async delegates
-    → AgentCore (agents/core.py)          ReAct loop:
-        LLMGateway (gateway/)             provider adapters · retry · adaptive routing · token budgeting
-        ToolRegistry (tools/)             Read · Write · Edit · Bash · Grep · Skill · SemanticSearch ·
-                                          WebSearch · WebFetch · Delegate · Blackboard
-        SafetyLayer (safety/)             risk-tier gating · checkpoint / approval gates · pattern blocks
-        CostTracker (cost/)               per-call projection · 95% budget cutoff
-        SessionToolTracker                inline waste/efficiency nudges (capped at 10/session)
-        RepeatedFailureTracker            13-category error classification · recovery strategies
+CLI → Orchestrator → AgentCore (ReAct loop)
+                       ├─ LLMGateway      provider adapters · retry · adaptive routing
+                       ├─ ToolRegistry    Read · Write · Edit · Bash · Grep · …
+                       ├─ SafetyLayer     risk-tier gating · checkpoint gates
+                       ├─ CostTracker     pre-call projection · 95% cutoff
+                       └─ Memory          SQLite session store · ChromaDB long-term
 ```
 
-Pydantic v2 models in `atoms/`. SQLite-backed session store in `memory/`. ChromaDB for long-term memory. Tracing + Rich/file-based sinks in `observability/`. Textual TUI in `tui/`.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design decisions behind each component.
 
 ---
 
@@ -385,7 +380,3 @@ maike plugin <install|list|remove>
 ## License
 
 [Apache 2.0](LICENSE) — see the LICENSE file for the full text.
-
-## Status
-
-mAIke is **alpha**. The CLI surface is stabilizing but expect breaking changes. Bug reports and PRs welcome.
