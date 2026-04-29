@@ -42,7 +42,7 @@ Conditions: 12 mixed Verified+Lite instances, $2.00 budget per trial, April 2026
 | Flash Lite + Pro **advisor** | **4/12** | **11/12** | **$0.45** |
 | Pro (alone) | 4/12 | 10/12 | $18.14 |
 
-\*"Solved" = passes all three proxy verifier tiers. "Partial" = passes syntax and overlap but not semantic similarity. Neither maps to official SWE-bench scoring.
+\*"Solved" = passes all three proxy verifier tiers. "Partial" = passes syntax and overlap but not semantic similarity. Neither maps to official SWE-bench scoring. Models: Flash Lite = `gemini-3.1-flash-lite-preview`, Pro = `gemini-3.1-pro-preview`.
 
 The takeaway: under these conditions, the advisor pattern matched solo-Pro's solve rate at ~2.5% of the cost. Pro-solo also hit the budget cap on 5/12 trials and returned zero edits on 2.
 
@@ -114,7 +114,7 @@ maike
 Default model and pricing live in `maike/constants.py` and `maike/models_default.yaml`. Override per-session with `--provider` / `--model`, or persist to `~/.config/maike/models.yaml` (deep-merged with defaults).
 
 ```bash
-maike --provider gemini --model gemini-2.5-flash
+maike --provider gemini --model gemini-3.1-flash-lite-preview
 maike --provider anthropic --model claude-opus-4-20250514
 maike --provider ollama --model gemma4:26b
 ```
@@ -245,12 +245,17 @@ For isolated branch work, `maike worktree add/list/remove` wraps `git worktree` 
 
 ## Advisor
 
-Pair a cheap fast executor (e.g. Gemini Flash Lite) with a frontier-model **advisor** that fires only at decisive moments — long exploration, repeated failures, before the first edit, before completion.
+Pair a cheap fast executor (e.g. Gemini 3.1 Flash Lite) with a frontier-model **advisor** that fires only at decisive moments — long exploration, repeated failures, before the first edit, before completion.
 
 ```bash
-maike --provider gemini --model gemini-2.5-flash \
-      --advisor --advisor-provider anthropic --advisor-model claude-opus-4-20250514 \
+# Same-provider pairing (matches the eval above)
+maike --provider gemini --model gemini-3.1-flash-lite-preview \
+      --advisor --advisor-provider gemini --advisor-model gemini-3.1-pro-preview \
       --advisor-budget-pct 0.2
+
+# Cross-provider pairing also works
+maike --provider gemini --model gemini-3.1-flash-lite-preview \
+      --advisor --advisor-provider anthropic --advisor-model claude-opus-4-20250514
 ```
 
 The advisor never runs tools. It returns 1–3 sentences of guidance that mAIke injects into the executor's next turn as a `<maike-advisor>` context block. It has its own budget cap (default 20% of session). Trigger conditions live in `maike/agents/advisor.py`.
@@ -296,24 +301,16 @@ Delegate(action="wait", handle="...")
 
 ## Evaluation
 
-Two complementary suites:
+Built-in agentic test cases — seeders inject bugs into a workspace, verifiers run the project's tests, and per-feature outcomes are scored.
 
 ```bash
-# Built-in agentic test cases (seeders + verifiers + minimality scoring)
 maike eval --suite all
 maike eval --suite hard-agentic --keep-workspaces
-
-# SWE-bench — clones repos at correct commit, runs the orchestrator, captures diff
-maike swe-bench --variant lite                  # 300 instances
-maike swe-bench --variant verified              # 500 instances
-maike swe-bench --variant full                  # 2294 instances
-maike swe-bench --instance-ids django__django-11019 sympy__sympy-20590
-maike swe-bench --resume predictions.jsonl      # resume an interrupted run
 ```
 
 The `agentic_eval_score()` weights: workspace verified (35%) · session completed (25%) · tests passing (15%) · error recovery (10%) · change minimality (10%) · wasted-call efficiency (5%).
 
-SWE-bench output is a JSONL of predictions ready for the official Docker harness.
+For SWE-bench, see [Internal Eval — Advisor Pattern](#internal-eval--advisor-pattern) for results and the reproduction recipe; the [CLI Reference](#cli-reference) lists every `maike swe-bench` flag.
 
 ---
 
