@@ -1,0 +1,39 @@
+[project]
+name = "maike"
+version = "0.1.0"
+description = "mAIke - a local coding agent"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "anthropic>=0.40.0",
+    "chromadb>=0.5.0",
+    "google-genai>=1.0.0",
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-sdk>=1.25.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "textual>=0.90.0",
+    "tiktoken>=0.7.0",
+    "typer>=0.12.0",
+    "ruff>=0.15.6",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+swebench = ["datasets>=4.0.0"]
+
+[project.scripts]
+maike = "maike.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["maike*"]
+
+[tool.setuptools.package-data]
+maike = ["agents/prompts/*.md", "agents/prompts/**/*.md", "*.yaml", "tui/*.tcss"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

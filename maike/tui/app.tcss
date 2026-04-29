@@ -1,0 +1,298 @@
+/* mAIke TUI — sole CSS source of truth.
+ *
+ * Widget-specific DEFAULT_CSS in approval_screen.py, text_prompt_screen.py,
+ * and tool_widget.py handle their own modal/component styles.
+ * This file covers the main layout and message styling.
+ */
+
+/* ── Layout ────────────────────────────────────────────────────── */
+
+Screen {
+    layout: vertical;
+    background: $background;
+    /* ``popup`` sits above the base so the slash / mention palette floats
+     * over other widgets instead of sharing the docked-bottom strip with
+     * the input area (which used to hide short palettes behind it). */
+    layers: base popup;
+}
+
+HeaderBar {
+    dock: top;
+    height: 1;
+    background: $primary-background;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+MessageList {
+    height: 1fr;
+    min-height: 5;
+    scrollbar-gutter: stable;
+    padding: 0;
+}
+
+/* ── Bottom layout ─────────────────────────────────────────────────
+ * A single docked Vertical container holds the input and the status
+ * bar.  Putting them in a normal vertical flow lets us use margins for
+ * real gaps — dock-vs-dock siblings collapse to the same row.  Total
+ * container height tracks ``PromptInput._position_palette`` which
+ * offsets the slash palette above the whole stack.
+ */
+
+#bottom-stack {
+    dock: bottom;
+    height: auto;
+    margin: 0 0 1 0;   /* 1-row float above the terminal bottom edge */
+}
+
+PromptInput {
+    height: 5;
+    max-height: 12;
+    border: heavy $accent 40%;
+    margin: 0 1 1 1;    /* 1-row gap below the input border */
+    padding: 0 1;
+}
+
+PromptInput:focus {
+    border: heavy $accent;
+}
+
+PromptInput.-disabled {
+    opacity: 0.3;
+    border: heavy $surface;
+}
+
+PromptInput.-approval {
+    border: heavy $warning;
+}
+
+PromptInput.-waiting {
+    border: heavy #8b5cf6;
+}
+
+Footer {
+    dock: bottom;
+    display: none;
+}
+
+StatusBar {
+    height: 1;
+    background: $primary-background;
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+/* ── Message styles ──────────────────────────────────────────────
+ * The whole transcript shares a 4-cell left gutter.  User messages
+ * get a subtle background + accent left border; assistant messages
+ * get a muted left border so the visual rhythm of the chat is
+ * consistent from top to bottom.
+ */
+
+.user-msg {
+    background: $boost;
+    margin: 1 4 0 4;
+    padding: 0 1;
+    border-left: thick $accent;
+    height: auto;
+}
+
+.gutter-msg {
+    margin: 0 2 1 4;
+    padding: 0 1;
+    border-left: thick $surface;
+    height: auto;
+}
+
+.tool-msg {
+    margin: 0 2 0 4;
+    padding: 0;
+    color: $text-muted;
+    height: auto;
+}
+
+.info-msg {
+    margin: 0 2 0 4;
+    padding: 0;
+    color: $text-muted;
+    height: auto;
+}
+
+.error-msg {
+    margin: 0 2 0 4;
+    padding: 0;
+    color: $error;
+    height: auto;
+}
+
+.spinner-msg {
+    margin: 0 2 0 4;
+    padding: 0;
+    color: #3dbfa0;
+    height: 1;
+}
+
+.banner-line {
+    margin: 0 0 0 2;
+    padding: 0;
+    height: 1;
+}
+
+/* ── Turn separators ───────────────────────────────────────────── */
+
+TurnSeparator {
+    margin: 1 0;
+    color: $text-muted;
+    height: 1;
+    background: $surface;
+    padding: 0 2;
+}
+
+/* ── Completion palette (slash + @ mentions) ──────────────────────
+ * The palette floats on the ``popup`` layer so it renders above the
+ * input / footer / status-bar stack at the bottom of the screen.
+ * ``dock: bottom`` positions it relative to its parent, then
+ * ``offset`` lifts it above the 5-row bottom stack (input=3,
+ * footer=1, status=1).  If the input auto-resizes, the offset is
+ * updated from Python so the palette keeps hugging the top of the
+ * input.
+ */
+
+.completion-palette {
+    layer: popup;
+    dock: bottom;
+    offset-y: -5;
+    height: auto;
+    max-height: 10;
+    margin: 0 1;
+    padding: 0;
+    border: round $accent 60%;
+    background: $surface;
+    scrollbar-gutter: stable;
+}
+
+.completion-palette > .option-list--option-highlighted {
+    background: $accent 30%;
+    color: $text;
+    text-style: bold;
+}
+
+.completion-palette > .option-list--option {
+    padding: 0 1;
+}
+
+/* ── Collapsibles ───────────────────────────────────────────────
+ * Textual's Collapsible ships with `border-top: hkey $background;` which
+ * renders as a hashed `▔▔▔▔` line above every tool/delegate/thinking
+ * block.  In our transcript those bars fire off above each consecutive
+ * tool call and create unwanted visual noise between events.  We kill
+ * the border, the background tint, and the bottom padding so the widget
+ * reads as a simple in-line disclosure row.
+ */
+
+MessageList Collapsible {
+    margin: 0 0 0 4;
+    padding: 0;
+    background: transparent;
+    border-top: none;
+    padding-bottom: 0;
+}
+
+MessageList Collapsible:focus-within {
+    background-tint: transparent;
+}
+
+MessageList CollapsibleTitle {
+    padding: 0;
+    color: #8b5cf6;
+    text-style: none;
+    background: transparent;
+}
+
+MessageList CollapsibleTitle:hover {
+    background: $boost;
+    color: $text;
+}
+
+MessageList CollapsibleTitle:focus {
+    background: $boost;
+    color: $text;
+    text-style: bold;
+}
+
+/* ── Thinking blocks ───────────────────────────────────────────── */
+
+.thinking-content {
+    margin: 0 0 0 4;
+    padding: 0 1;
+    color: $text-muted;
+    border-left: thick #8b5cf6;
+}
+
+/* ── Markdown taming ───────────────────────────────────────────────
+ * Textual's built-in Markdown widget ships with loud defaults (reversed
+ * H1, thick horizontal rules, wide vertical margins on every block)
+ * that clash with the chat flow.  Override everything to a minimal,
+ * flat look that reads like prose — no banner headings, no rules, no
+ * padding around fences.  Code blocks keep a subtle background so they
+ * still stand out inline.
+ */
+
+.gutter-msg MarkdownH1,
+.gutter-msg MarkdownH2,
+.gutter-msg MarkdownH3,
+.gutter-msg MarkdownH4,
+.gutter-msg MarkdownH5,
+.gutter-msg MarkdownH6 {
+    margin: 1 0 0 0;
+    padding: 0;
+    text-style: bold;
+    color: $text;
+    background: transparent;
+    border: none;
+    height: auto;
+}
+
+.gutter-msg MarkdownParagraph {
+    margin: 0 0 1 0;
+    padding: 0;
+}
+
+.gutter-msg MarkdownBlockQuote {
+    margin: 0 0 1 0;
+    padding: 0 0 0 1;
+    border-left: thick $accent 40%;
+    color: $text-muted;
+    background: transparent;
+}
+
+.gutter-msg MarkdownBulletList,
+.gutter-msg MarkdownOrderedList {
+    margin: 0 0 1 0;
+    padding: 0 0 0 1;
+}
+
+.gutter-msg MarkdownListItem {
+    margin: 0;
+    padding: 0;
+}
+
+.gutter-msg MarkdownHorizontalRule {
+    margin: 1 0;
+    height: 1;
+    color: $text-muted;
+    background: transparent;
+    border: none;
+}
+
+.gutter-msg MarkdownFence {
+    margin: 0 0 1 0;
+    padding: 0 1;
+    background: $boost;
+    border: none;
+}
+
+.gutter-msg MarkdownTable {
+    margin: 0 0 1 0;
+}
