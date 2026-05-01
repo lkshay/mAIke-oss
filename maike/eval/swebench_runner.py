@@ -238,25 +238,98 @@ class SWEBenchRunner:
                 error=f"clone failed: {exc}",
             )
 
+        # Probe the repo for its test runner + target Python version so we
+        # can hint at both in the prompt.  Falls back to a sane Python
+        # default if probe finds nothing.
+        target_python_version: str | None = None
+        try:
+            from maike.runtime.probe import EnvironmentProbe
+            probe_manifest = EnvironmentProbe().probe(workspace)
+            detected_test_cmd = (probe_manifest.test_command or "pytest -x --tb=short").strip()
+            target_python_version = probe_manifest.target_language_version
+        except Exception as _probe_exc:
+            logger.debug("EnvironmentProbe failed for %s: %s", instance.instance_id, _probe_exc)
+            detected_test_cmd = "pytest -x --tb=short"
+
+        # Build the Python-mismatch warning block.  If the target Python
+        # is older than the host, the agent will hit ``ModuleNotFoundError``
+        # on stdlib modules removed in newer Pythons (cgi removed in 3.13,
+        # asyncore in 3.12, imp in 3.12, distutils in 3.12) and waste budget
+        # "fixing" them.  See django__django-11400 (24 Apr 2026) — Flash
+        # spent extensive iteration patching a cgi import that the harness
+        # never sees.  We tell the agent explicitly: trust the project's
+        # python_requires, the harness uses the matching Python.
+        import sys as _sys
+        host_py = f"{_sys.version_info.major}.{_sys.version_info.minor}"
+        if target_python_version:
+            python_block = (
+                "## Python version contract\n\n"
+                f"- This project's `python_requires`: **`{target_python_version}`** "
+                "(the harness will run against a Python in that range).\n"
+                f"- Your local Python (host): **{host_py}**.\n"
+                "- If your local `pytest` raises `ModuleNotFoundError` on stdlib "
+                "modules (`cgi`, `asyncore`, `imp`, `distutils`, etc.), that is a "
+                "host-vs-target version mismatch — those modules exist in the "
+                "target Python and the harness will resolve them. Do NOT 'fix' "
+                "the import. Skip that test locally and focus on the actual issue.\n\n"
+            )
+        else:
+            python_block = (
+                "## Python version contract\n\n"
+                f"- Your local Python is **{host_py}**; the harness uses the project's "
+                "target Python (often older).\n"
+                "- If `pytest` fails locally with `ModuleNotFoundError` on stdlib "
+                "modules (`cgi`, `asyncore`, `imp`, `distutils`), that's a host-vs-target "
+                "mismatch — do NOT 'fix' the import. Focus on the actual issue.\n\n"
+            )
+
         # Run the agent.
         error: str | None = None
         cost_usd = 0.0
         tokens_used = 0
         try:
-            # Wrap the issue text with a prescriptive fix directive.
-            # The agent must focus on editing source code, not setting
-            # up environments or running tests (the SWE-bench harness
-            # handles verification in its own Docker container).
+            # Task prompt: explain the harness contract so the agent knows
+            # local installs/runs don't affect grading.  This unblocks
+            # test-driven self-correction (the dominant strategy in
+            # leading agents like Claude Code, OpenHands) without the
+            # agent overfitting to the FAIL_TO_PASS spec.
             task = (
-                "Fix the following GitHub issue by editing the source code "
-                "in this repository.\n\n"
-                "IMPORTANT RULES:\n"
-                "1. Read the relevant source files to understand the bug\n"
-                "2. Use Edit to make the minimal fix — do NOT rewrite entire files\n"
-                "3. Do NOT modify test files\n"
-                "4. Do NOT try to install dependencies or set up the environment\n"
-                "5. Do NOT try to run the test suite — just make the code fix\n"
-                "6. Focus on the source code change, nothing else\n\n"
+                f"You are fixing a real bug in `{instance.repo}` "
+                f"(commit `{instance.base_commit[:8]}`).\n\n"
+                "## How the SWE-bench harness grades you\n\n"
+                "- It runs hidden FAIL_TO_PASS tests on a *fresh clone* with your patch applied.\n"
+                "- Whatever you install (`pip install ...`) or run (`pytest ...`) locally is "
+                "discarded after grading. Use the local environment freely for self-correction.\n\n"
+                f"{python_block}"
+                "## Workflow\n\n"
+                "**Bias toward action.** Even with imperfect information, make your best "
+                "surgical edit and submit. An imperfect targeted fix is far better than "
+                "an empty patch.\n\n"
+                "1. **Start with the smallest possible edit.** Identify the function or "
+                "class named in the issue and make the minimal change that addresses it. "
+                "Do not explore broadly before editing.\n"
+                "2. **Tests are for verification, not discovery.** "
+                f"If `{detected_test_cmd}` runs easily, use it to confirm your specific fix. "
+                "Don't aim to make every test pass — many may fail for unrelated environment "
+                "reasons (Python version drift, missing optional deps). Target the test file "
+                "named in the issue.\n"
+                "3. **Stay in scope.** Touch only files clearly related to the issue. Cleaning "
+                "up unrelated code, 'modernizing' adjacent helpers, or refactoring imports is "
+                "OUT OF SCOPE and is the most common way to break tests the harness cares about.\n"
+                "4. **Submit the smallest viable diff.** A 5-line targeted fix beats a 50-line "
+                "refactor that 'covers more cases'. If your patch exceeds ~30 lines, ask "
+                "whether you're doing more than the issue requires.\n\n"
+                "## Constraints\n\n"
+                "- Do NOT modify test files. The harness's `FAIL_TO_PASS` tests are hidden — "
+                "modifying tests is cheating.\n"
+                "- Do NOT modernize imports (e.g. `from collections import Mapping` → "
+                "`from collections.abc import Mapping`). The harness's target Python may "
+                "have different stdlib structure than your host.\n"
+                "- Do NOT refactor adjacent code, rewrite helper functions, or 'clean up' "
+                "logic that isn't named in the issue.\n"
+                "- Do NOT try to enumerate which tests the harness will run. Focus on the issue text.\n"
+                "- Do NOT run destructive git commands (`git reset --hard`, `git checkout .`, "
+                "`git stash`) — these can silently lose your work before patch capture.\n\n"
                 f"## Issue\n\n{instance.problem_statement}"
             )
             cost_usd, tokens_used = await asyncio.wait_for(
@@ -285,6 +358,24 @@ class SWEBenchRunner:
         # checkpoint commits made during the run, not just unstaged changes).
         patch = capture_patch(workspace, base_commit=instance.base_commit)
         patch_lines = len(patch.splitlines()) if patch else 0
+
+        # Pre-flight: verify the patch is internally consistent with the
+        # workspace state.  Validation failure doesn't kill submission —
+        # the harness might still accept it — but we log a warning so the
+        # failure mode is visible in the eval output.  See SWE-bench v2
+        # astropy__astropy-13398: phantom no-op hunks made patch(1)
+        # think the patch was reverse-applied.  _normalize_patch now
+        # strips no-op hunks, but other malformations may remain.
+        if patch:
+            from maike.eval.swebench import validate_patch_applies
+            ok, reason = validate_patch_applies(
+                patch, instance.base_commit, workspace,
+            )
+            if not ok:
+                logger.warning(
+                    "patch validation failed for %s: %s",
+                    instance.instance_id, reason,
+                )
 
         # Write prediction incrementally.
         append_prediction(
@@ -334,14 +425,28 @@ class SWEBenchRunner:
         from maike.orchestrator.orchestrator import Orchestrator
 
         cost_tracker = CostTracker(session_budget_usd=budget if budget > 0 else None)
-        # Per-instance trace log so timed-out sessions still leave a record.
-        # Without this, a timed-out run leaves agent_runs/step_results empty
-        # in session.db and there's no way to diagnose what the agent did.
-        # FileTraceSink appends each event as a JSON line and flushes per
-        # write — survives asyncio.CancelledError from the wait_for timeout.
+        # File trace sink disabled for SWE-bench eval runs.  On tough instances
+        # the react loop can produce ~200K events/sec when stuck, generating
+        # multi-GB trace files in minutes and filling disk on a host with
+        # tight free space.  In-memory tracer events are still captured by
+        # ``Tracer.events`` for the few callers that read them; what we drop
+        # is the per-event JSONL write to disk.  Re-enable by setting
+        # ``MAIKE_SWEBENCH_TRACE_FILES=1`` in the environment.
+        import os as _os
+        _enable_trace_files = _os.environ.get("MAIKE_SWEBENCH_TRACE_FILES") == "1"
         trace_path = workspace / ".maike" / "trace.jsonl"
-        with FileTraceSink(log_path=trace_path) as trace_sink:
-            tracer = Tracer(sink=trace_sink)
+        if _enable_trace_files:
+            from contextlib import nullcontext
+            sink_cm = FileTraceSink(log_path=trace_path)
+            file_sink = sink_cm
+        else:
+            sink_cm = None
+            file_sink = None
+
+        try:
+            if file_sink is not None:
+                file_sink.__enter__()
+            tracer = Tracer(sink=file_sink)
             orchestrator = Orchestrator(
                 base_path=workspace,
                 llm_gateway=LLMGateway(cost_tracker, tracer, provider_name=provider),
@@ -365,6 +470,9 @@ class SWEBenchRunner:
                 if advisor_budget_pct is not None:
                     run_kwargs["advisor_budget_pct"] = advisor_budget_pct
             await orchestrator.run(**run_kwargs)
+        finally:
+            if file_sink is not None:
+                file_sink.__exit__(None, None, None)
 
         return cost_tracker.session_total, sum(
             r.total_tokens for r in cost_tracker.records

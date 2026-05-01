@@ -1,4 +1,6 @@
-"""Convergence detection and nudge generation for long-running agents."""
+"""Convergence detection and nudge generation for long-running agents.
+Note: this is technical debt at large, and technically should only be fired for cheaper models struggling to converge.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +15,6 @@ _READ_TOOLS = {"Read", "Grep", "read_file", "search_files"}
 
 # Tool names that indicate validation.
 _VALIDATION_TOOLS = {"Bash", "syntax_check", "run_tests", "run_lint", "run_typecheck"}
-
 
 def detect_spinning(conversation: list[dict[str, Any]], window: int = 6) -> bool:
     """Return True if the last *window* tool calls show a repetitive pattern.
@@ -58,7 +59,14 @@ def _outcome_signal(conversation: list[dict[str, Any]], window: int = 10) -> boo
 
 
 def _file_churn_signal(conversation: list[dict[str, Any]], window: int = 12) -> bool:
-    """Detect spinning via repeated read-then-edit cycling on the same files."""
+    """Detect spinning via repeated read-then-edit cycling on the same files.
+
+    Threshold: ``>=2 reads AND >=2 edits`` on any single file in the recent
+    window (was ``>=3 reads`` before SWE-bench smoke 24 Apr 2026).  Cheap
+    models like Flash Lite re-read a failing file expecting different
+    content; firing L1 sooner gives the recovery nudge a chance to break
+    the loop before budget is exhausted.
+    """
     calls = _extract_recent_tool_calls(conversation, window)
     file_reads: dict[str, int] = {}
     file_edits: dict[str, int] = {}
@@ -70,7 +78,7 @@ def _file_churn_signal(conversation: list[dict[str, Any]], window: int = 12) -> 
         elif tool_name in _MUTATION_TOOLS:
             file_edits[path] = file_edits.get(path, 0) + 1
     return any(
-        file_reads.get(f, 0) >= 3 and file_edits.get(f, 0) >= 2
+        file_reads.get(f, 0) >= 2 and file_edits.get(f, 0) >= 2
         for f in set(file_reads) | set(file_edits)
     )
 

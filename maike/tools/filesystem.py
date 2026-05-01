@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from maike.atoms.artifact import ArtifactKind, ArtifactStatus, ArtifactType
 from maike.atoms.tool import RiskLevel, ToolResult, ToolSchema
@@ -29,8 +32,16 @@ class FileReadState:
     errors whenever they varied the path spelling between Read and Edit.
     """
 
+    # After this many consecutive "file not read" errors on the same path,
+    # the gate self-bypasses (with a warning) to prevent approval-loop
+    # spirals on cheap models that forget what they already read.  See
+    # SWE-bench smoke 24 Apr 2026 — Flash Lite hit the gate, retried with
+    # the same args, and burned budget cycling without progress.
+    _UNREAD_BYPASS_THRESHOLD = 2
+
     def __init__(self) -> None:
         self._state: dict[str, float] = {}
+        self._unread_errors: dict[str, int] = {}
         self._workspace: Path | None = None
 
     def configure(self, workspace: Path) -> None:
@@ -51,15 +62,41 @@ class FileReadState:
 
     def record_read(self, path: str) -> None:
         """Record that a file was read at the current time."""
-        self._state[self._normalize(path)] = time.monotonic()
+        norm = self._normalize(path)
+        self._state[norm] = time.monotonic()
+        # A successful read clears any prior "not read" error count.
+        self._unread_errors.pop(norm, None)
 
     def was_read(self, path: str) -> bool:
         """Check if a file has been read in this session."""
         return self._normalize(path) in self._state
 
+    def note_unread_attempt(self, path: str) -> int:
+        """Increment the per-path consecutive-failure counter, return new count.
+
+        Used by Edit to decide whether to bypass the read-gate after
+        ``_UNREAD_BYPASS_THRESHOLD`` repeated attempts.
+        """
+        norm = self._normalize(path)
+        self._unread_errors[norm] = self._unread_errors.get(norm, 0) + 1
+        return self._unread_errors[norm]
+
+    def should_bypass_read_gate(self, path: str) -> bool:
+        """Has the agent hit the read-gate enough times to warrant bypass?
+
+        After bypass, the path is marked as read so subsequent Edits
+        proceed normally.  Caller should log a warning.
+        """
+        return (
+            self._unread_errors.get(self._normalize(path), 0)
+            >= self._UNREAD_BYPASS_THRESHOLD
+        )
+
     def clear(self, path: str) -> None:
         """Clear read state for a file (e.g. after write/edit changes it)."""
-        self._state.pop(self._normalize(path), None)
+        norm = self._normalize(path)
+        self._state.pop(norm, None)
+        self._unread_errors.pop(norm, None)
 
     def reset(self) -> None:
         """Clear all tracked read state.
@@ -68,6 +105,7 @@ class FileReadState:
         may have modified files without going through Read/Write/Edit.
         """
         self._state.clear()
+        self._unread_errors.clear()
 
 
 # Module-level singleton — shared across Read and Edit tool registrations

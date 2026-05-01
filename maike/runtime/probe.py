@@ -37,6 +37,13 @@ class EnvironmentManifest:
     env_preferences: dict[str, str] = field(default_factory=dict)  # from MAIKE.md ## Environment
     # Framework detection.
     frameworks: list[str] = field(default_factory=list)  # e.g. ["django", "react", "fastapi"]
+    # Target language version (e.g. ">=3.7,<3.11" for a Python project's
+    # python_requires).  Surfaced to the agent so it doesn't waste budget
+    # "fixing" stdlib import errors that are actually host-vs-target
+    # version mismatches.  See django__django-11400 (24 Apr 2026): agent
+    # spent budget patching cgi removal in Python 3.13 even though the
+    # harness runs Python 3.7.  None when not detected.
+    target_language_version: str | None = None
 
     def to_runtime_config(self) -> "RuntimeConfig":
         """Bridge to existing LocalRuntime interface."""
@@ -76,6 +83,10 @@ class EnvironmentManifest:
         ]
         if self.package_manager:
             lines.append(f"Package manager: {self.package_manager}")
+        if self.target_language_version:
+            lines.append(
+                f"Target {self.language} version: {self.target_language_version}"
+            )
         if self.frameworks:
             lines.append(f"Frameworks: {', '.join(self.frameworks)}")
         if self.structure_summary:
@@ -349,6 +360,14 @@ class EnvironmentProbe:
             manifest.typecheck_command = "mypy ."
         elif (workspace / "pyrightconfig.json").exists() or (workspace / "pyproject.toml").exists() and self._pyproject_has(workspace, "pyright"):
             manifest.typecheck_command = "pyright ."
+
+        # Extract Python version constraint (python_requires from setup.py
+        # or requires-python from pyproject.toml).  Used to warn the agent
+        # about host-vs-target Python mismatches in SWE-bench eval, where
+        # the host runs a newer Python than the target instance and
+        # ImportError on removed stdlib modules (cgi, asyncore, imp) gets
+        # misread as a real bug.
+        manifest.target_language_version = _extract_python_requires(workspace)
 
     def _probe_node(self, workspace: Path, manifest: EnvironmentManifest) -> None:
         for filename, package_manager, install_cmd, install_all_cmd, list_packages_cmd in self.NODE_PM_SIGNALS:
@@ -1006,6 +1025,84 @@ _FRAMEWORK_HINTS: dict[str, str] = {
     "actix": "Rust Actix-Web — handlers in src/handlers/, routes in main.rs or config",
     "axum": "Rust Axum — handlers + routers in src/, state shared via Extension",
 }
+
+
+_PYTHON_REQUIRES_PATTERNS = (
+    # setup.py: python_requires="..."
+    re.compile(r"""python_requires\s*=\s*["']([^"']+)["']"""),
+    # setup.cfg: python_requires = ...
+    re.compile(r"""(?m)^\s*python_requires\s*=\s*(.+)\s*$"""),
+    # pyproject.toml: requires-python = "..."
+    re.compile(r"""requires-python\s*=\s*["']([^"']+)["']"""),
+)
+
+# Tuple-style version constants near python_requires.  Django et al. do:
+#   REQUIRED_PYTHON = (3, 6)
+#   python_requires='>={}.{}'.format(*REQUIRED_PYTHON)
+_PYTHON_VERSION_TUPLE = re.compile(
+    r"""\b([A-Z][A-Z_]*PYTHON[A-Z_]*|MIN_VERSION)\s*=\s*"""
+    r"""\(\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*\d+)?\s*\)""",
+)
+
+# Format-marker characters that indicate a template, not a literal string.
+_TEMPLATE_MARKERS = frozenset("{}()%+")
+
+
+def _extract_python_requires(workspace: Path) -> str | None:
+    """Extract a Python version constraint from project config.
+
+    Reads setup.py, setup.cfg, and pyproject.toml and returns the first
+    ``python_requires`` / ``requires-python`` value found.  Resolves
+    Django-style format templates (``'>={}.{}'.format(*REQUIRED_PYTHON)``)
+    by locating the tuple constant in the same file.  Returns ``None``
+    if no constraint can be determined.
+
+    Used to warn agents about host-vs-target Python mismatches in
+    SWE-bench eval, where a Python 3.13/3.14 host hitting ``cgi`` import
+    errors gets misread as a real bug needing a fix.
+    """
+    candidates = ("setup.py", "setup.cfg", "pyproject.toml")
+    for fname in candidates:
+        path = workspace / fname
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for pattern in _PYTHON_REQUIRES_PATTERNS:
+            m = pattern.search(text)
+            if not m:
+                continue
+            value = m.group(1).strip().strip("'\"")
+            if not any(c in value for c in _TEMPLATE_MARKERS):
+                return value  # plain literal — done
+            resolved = _resolve_python_version_template(text, value)
+            if resolved:
+                return resolved
+            # Template not resolvable from this file; keep scanning others.
+        # Fall back: any ``X_PYTHON = (M, N)`` tuple even without an explicit
+        # python_requires line.  Better than nothing for projects that
+        # define the version programmatically.
+        m = _PYTHON_VERSION_TUPLE.search(text)
+        if m:
+            return f">={m.group(2)}.{m.group(3)}"
+    return None
+
+
+def _resolve_python_version_template(text: str, template: str) -> str | None:
+    """Substitute a ``>={}.{}`` template using a tuple constant in ``text``."""
+    m = _PYTHON_VERSION_TUPLE.search(text)
+    if not m:
+        return None
+    major, minor = m.group(2), m.group(3)
+    if "{}.{}" in template:
+        return template.replace("{}.{}", f"{major}.{minor}", 1)
+    if template.count("{}") >= 2:
+        return template.replace("{}", major, 1).replace("{}", minor, 1)
+    if template.count("{}") == 1:
+        return template.replace("{}", f"{major}.{minor}")
+    return None
 
 
 def _framework_guidance(frameworks: list[str]) -> str:

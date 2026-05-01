@@ -225,6 +225,10 @@ class AgenticMetrics:
     # Iteration tracking
     iteration_count: int = 0
     fix_test_fix_cycles: int = 0
+    # Number of test runs (pytest/jest/etc) the agent issued during the
+    # session.  Leading indicator of test-driven self-correction; sessions
+    # that never run tests are likely flying blind on SWE-bench.
+    test_iteration_count: int = 0
 
     # Cost normalization
     cost_per_resolved: float | None = None

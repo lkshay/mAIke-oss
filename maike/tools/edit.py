@@ -85,10 +85,16 @@ def _find_fuzzy_match(content: str, old_text: str) -> str | None:
             best_ratio = ratio
             best_start = i
 
-    if best_ratio < 0.5:
-        return None  # Nothing close enough
+    if best_ratio < 0.30:
+        return None  # Nothing close enough — even a context block would mislead.
 
-    # Show what the file actually contains at the closest match
+    # Show what the file actually contains at the closest match.  We emit a
+    # context block down to 30% similarity (was 50%) — cheap models like
+    # Flash Lite often produce 30–50% matches when they get whitespace,
+    # indentation, or surrounding context wrong; without this block they
+    # loop instead of recovering.  See SWE-bench smoke on
+    # pytest-dev__pytest-10356 (24 Apr 2026): Flash burned 308s in a
+    # 50%-match-blind loop until budget capped.
     context_start = max(0, best_start - 1)
     context_end = min(len(content_lines), best_start + window_size + 1)
     actual_lines = content_lines[context_start:context_end]
@@ -96,13 +102,22 @@ def _find_fuzzy_match(content: str, old_text: str) -> str | None:
         f"  {context_start + 1 + j:4d} | {line}"
         for j, line in enumerate(actual_lines)
     )
+    if best_ratio >= 0.5:
+        confidence_note = "high-confidence"
+    else:
+        confidence_note = (
+            "low-confidence (your old_text differs significantly — verify "
+            "before retrying)"
+        )
 
     return (
-        f"No exact match, but a {best_ratio:.0%} similar block was found "
-        f"at lines {best_start + 1}-{best_start + window_size}:\n"
+        f"No exact match, but a {best_ratio:.0%} similar block "
+        f"({confidence_note}) was found at lines "
+        f"{best_start + 1}-{best_start + window_size}:\n"
         f"```\n{actual_block}\n```\n"
         f"Compare this with your old_text and fix the differences "
-        f"(whitespace, indentation, exact characters)."
+        f"(whitespace, indentation, exact characters). If unsure, "
+        f"re-read the file with line range start_line={best_start + 1}."
     )
 
 
@@ -128,18 +143,33 @@ def register_edit_tools(
         replace_all = kwargs.get("replace_all", False)
 
         # Gate: require the file to have been Read first.  This prevents
-        # edits based on stale or hallucinated content.
+        # edits based on stale or hallucinated content.  Cheap models sometimes
+        # forget they already read a file (context pruning, prior turns).
+        # After ``_UNREAD_BYPASS_THRESHOLD`` consecutive "file not read"
+        # errors on the same path, we self-bypass with a warning — failing
+        # the same way for two iterations in a row buys nothing.  The
+        # subsequent Edit will either succeed or surface a different,
+        # more actionable error (e.g. "old_text not found").
         if not _file_read_state.was_read(path):
-            return ToolResult(
-                tool_name="edit_file",
-                success=False,
-                output=(
-                    f"File has not been read yet. Read it first before editing.\n"
-                    f'  Read(path="{path}")\n'
-                    f"Then retry the Edit with exact text from the file."
-                ),
-                error="file_not_read",
+            attempts = _file_read_state.note_unread_attempt(path)
+            if not _file_read_state.should_bypass_read_gate(path):
+                return ToolResult(
+                    tool_name="edit_file",
+                    success=False,
+                    output=(
+                        f"File has not been read yet. Read it first before editing.\n"
+                        f'  Read(path="{path}")\n'
+                        f"Then retry the Edit with exact text from the file."
+                    ),
+                    error="file_not_read",
+                )
+            logger.warning(
+                "Bypassing read-gate for %s after %d consecutive 'file not read' errors",
+                path, attempts,
             )
+            # Mark as read so the rest of this Edit and subsequent Edits
+            # proceed normally.  The agent already had its chance to Read.
+            _file_read_state.record_read(path)
 
         # Read the FULL file content — no truncation.  The Edit tool
         # must see every line to match old_text reliably.  The Read tool

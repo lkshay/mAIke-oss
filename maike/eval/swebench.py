@@ -261,30 +261,231 @@ def capture_patch(workspace: Path, base_commit: str | None = None) -> str:
     a malformed diff, that is its own failure to surface honestly — not
     something the harness should paper over.
     """
+    # ``errors="replace"`` — git diff occasionally surfaces non-UTF-8 bytes
+    # (binary files added by the agent, files with mixed encodings, mojibake
+    # in test fixtures).  Without this, capture_patch crashes with
+    # ``UnicodeDecodeError`` and torpedoes the entire eval loop.  Bug
+    # observed during SWE-bench v2 Pro run, 24 Apr 2026 — instance 9 of 12
+    # crashed on byte 0x8f at position 79651 in subprocess output.
     try:
         if base_commit:
             committed = subprocess.run(
                 ["git", "diff", f"{base_commit}..HEAD"],
-                cwd=workspace, capture_output=True, text=True, timeout=30,
+                cwd=workspace, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
             ).stdout
-            # Append any unstaged working-tree changes (rare — react checkpoint
-            # usually commits them, but covers the case where the run aborted
-            # between an Edit and the next checkpoint).
             uncommitted = subprocess.run(
                 ["git", "diff"],
-                cwd=workspace, capture_output=True, text=True, timeout=30,
+                cwd=workspace, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
             ).stdout
-            return (committed + uncommitted).strip()
+            combined = committed + uncommitted
+
+            # Stash recovery — if the captured diff is empty but a stash
+            # exists, the agent likely ran ``git stash`` without popping
+            # (often during confused "clean up" attempts).  Surface the
+            # stashed diff so the work isn't silently lost.  See
+            # django__django-11400 (24 Apr 2026): agent did real work per
+            # session memory but the patch was empty.  We log loudly so
+            # the failure mode is debuggable, and append the stash diff
+            # to the captured patch so harness scoring at least sees the
+            # work.  If the user intentionally stashed (rare), they'll
+            # see the warning and can investigate.
+            if not _normalize_patch(combined):
+                stash_diff = _capture_stash_diff(workspace)
+                if stash_diff:
+                    logger.warning(
+                        "capture_patch: HEAD diff against base_commit is empty "
+                        "but git stash contains %d chars of agent work; "
+                        "recovering stashed changes into the patch. "
+                        "(workspace=%s)",
+                        len(stash_diff), workspace,
+                    )
+                    return _normalize_patch(stash_diff)
+            return _normalize_patch(combined)
         result = subprocess.run(
             ["git", "diff"],
             cwd=workspace,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
-        return result.stdout.strip()
+        return _normalize_patch(result.stdout)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return ""
+
+
+def _capture_stash_diff(workspace: Path) -> str:
+    """Return the diff of all entries in ``git stash list``, concatenated.
+
+    Used as a recovery path in ``capture_patch`` when HEAD is unchanged.
+    Returns empty string when there are no stashes or git fails.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "stash", "list"],
+            cwd=workspace, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        ).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return ""
+    stash_refs = [
+        line.split(":", 1)[0].strip()
+        for line in listing.splitlines()
+        if line.startswith("stash@")
+    ]
+    if not stash_refs:
+        return ""
+    diffs: list[str] = []
+    for ref in stash_refs:
+        try:
+            d = subprocess.run(
+                ["git", "stash", "show", "-p", ref],
+                cwd=workspace, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=15,
+            ).stdout
+            if d:
+                diffs.append(d)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            continue
+    return "\n".join(diffs)
+
+
+def _normalize_patch(text: str) -> str:
+    """Make captured-diff text harness-safe.
+
+    Three transforms:
+
+    1. Strip leading whitespace (cosmetic).
+    2. Strip no-op hunks — hunks where ``-`` and ``+`` lines are
+       byte-identical and in the same order.  These appear when the
+       agent edits a file then partially reverts, leaving phantom
+       hunks that ``patch(1)`` interprets as "Reversed (or previously
+       applied)" — sometimes reverse-applying them and undoing real
+       work.  See SWE-bench v2 astropy__astropy-13398 (24 Apr 2026).
+    3. Guarantee exactly one trailing newline.  ``patch(1)`` rejects
+       diffs ending mid-line with "patch unexpectedly ends in middle
+       of line".
+
+    Returns empty when there's no meaningful content.
+    """
+    text = text.lstrip()
+    if not text.strip():
+        return ""
+    text = _strip_noop_hunks(text)
+    if not text.strip():
+        return ""
+    return text if text.endswith("\n") else text + "\n"
+
+
+def _strip_noop_hunks(diff: str) -> str:
+    """Drop hunks whose ``-`` lines exactly match ``+`` lines (no-ops).
+
+    Also drops file sections whose every hunk is a no-op.  Keeps file
+    headers (``diff --git``, ``---``, ``+++``, ``index``, mode lines)
+    only for files with at least one surviving hunk.
+    """
+    if not diff:
+        return ""
+
+    output_files: list[str] = []
+    current_file_header: list[str] = []
+    current_hunks: list[tuple[str, list[str]]] = []
+    current_hunk_header: str | None = None
+    current_hunk_body: list[str] = []
+    in_file = False
+
+    def _flush_hunk() -> None:
+        nonlocal current_hunk_header, current_hunk_body
+        if current_hunk_header is not None:
+            current_hunks.append((current_hunk_header, current_hunk_body))
+        current_hunk_header = None
+        current_hunk_body = []
+
+    def _flush_file() -> None:
+        nonlocal current_file_header, current_hunks
+        _flush_hunk()
+        kept = [(h, body) for h, body in current_hunks if not _is_noop_hunk(body)]
+        if kept and current_file_header:
+            output_files.extend(current_file_header)
+            for h, body in kept:
+                output_files.append(h)
+                output_files.extend(body)
+        current_file_header = []
+        current_hunks = []
+
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("diff --git"):
+            _flush_file()
+            current_file_header = [line]
+            in_file = True
+        elif in_file and line.startswith("@@"):
+            _flush_hunk()
+            current_hunk_header = line
+            current_hunk_body = []
+        elif current_hunk_header is not None:
+            current_hunk_body.append(line)
+        elif in_file:
+            current_file_header.append(line)
+    _flush_file()
+    return "".join(output_files)
+
+
+def _is_noop_hunk(body: list[str]) -> bool:
+    """A hunk whose removed lines exactly match its added lines does nothing."""
+    removed = [
+        line[1:]
+        for line in body
+        if line.startswith("-") and not line.startswith("---")
+    ]
+    added = [
+        line[1:]
+        for line in body
+        if line.startswith("+") and not line.startswith("+++")
+    ]
+    # Empty + empty would be a hunk with only context (malformed).  Treating
+    # it as a no-op is the safe choice — patch(1) would reject it anyway.
+    return removed == added
+
+
+def validate_patch_applies(patch: str, base_commit: str, repo_workspace: Path) -> tuple[bool, str]:
+    """Pre-flight check: does ``patch`` apply cleanly against ``base_commit``?
+
+    Uses ``git apply --check --reverse`` against the repo's current HEAD
+    (assumed to contain the patch's effects, since capture_patch was run
+    on this same workspace).  ``--reverse --check`` succeeds iff the
+    patch can be cleanly *un*-applied — which is equivalent to the patch
+    being internally consistent with the workspace's net change since
+    ``base_commit``.
+
+    Returns ``(ok, reason)``.  ``reason`` is an empty string on success,
+    or a brief diagnostic on failure (e.g. "git apply --check --reverse
+    failed: …").  Failure here doesn't mean the patch is necessarily
+    bad in the harness — it just means the local workspace state can't
+    self-validate it.
+    """
+    if not patch:
+        return False, "empty patch"
+    try:
+        proc = subprocess.run(
+            ["git", "apply", "--check", "--reverse", "-"],
+            cwd=repo_workspace,
+            input=patch,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        return False, f"validation subprocess failed: {exc!r}"
+    if proc.returncode == 0:
+        return True, ""
+    msg = (proc.stderr or proc.stdout or "").strip().splitlines()
+    tail = " | ".join(msg[-3:]) if msg else "unknown"
+    return False, f"git apply --check --reverse failed: {tail}"
 
 
 @dataclass

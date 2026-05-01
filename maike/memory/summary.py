@@ -57,6 +57,8 @@ def _git_diff_stat(workspace: Path | None) -> tuple[int, str]:
             ["git", "-C", str(workspace), "diff", "--stat", "HEAD~1"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         if result.returncode != 0:

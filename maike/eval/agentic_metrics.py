@@ -313,6 +313,7 @@ def collect_agentic_metrics(
     total, wasted_reads, wasted_greps = detect_wasted_calls(all_tool_calls)
     corrections, unrecovered, recovery_rate = compute_error_recovery(all_tool_calls)
     sync_delegates, async_delegates = detect_delegation_usage(all_tool_calls)
+    test_iterations = sum(1 for tc in all_tool_calls if _is_test_run(tc))
 
     wasted_ratio = (wasted_reads + wasted_greps) / max(total, 1)
     cost_per_resolved = (cost_usd / difficulty_weight) if passed else None
@@ -334,6 +335,7 @@ def collect_agentic_metrics(
     return AgenticMetrics(
         iteration_count=iterations,
         fix_test_fix_cycles=cycles,
+        test_iteration_count=test_iterations,
         cost_per_resolved=cost_per_resolved,
         difficulty_weight=difficulty_weight,
         total_tool_calls=total,

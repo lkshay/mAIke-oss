@@ -82,6 +82,8 @@ def _git_recent_changes(workspace: Path, depth: int = 3) -> str:
             cwd=workspace,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():

@@ -423,6 +423,20 @@ class RepeatedFailureTracker:
             ],
             "confidence": 0.95,
         },
+        {
+            # Edit tool produced no change — old_text didn't match or matched
+            # ambiguously.  Cheap models like Flash Lite can loop here for
+            # minutes (see SWE-bench smoke on pytest-dev__pytest-10356,
+            # 24 Apr 2026).  Fast detection lets the recovery hint fire on
+            # the first repeat instead of after the agent has already burned
+            # tokens.
+            "category": "malformed_edit",
+            "patterns": [
+                re.compile(r"old_text not found", re.IGNORECASE),
+                re.compile(r"matches \d+ locations", re.IGNORECASE),
+            ],
+            "confidence": 0.95,
+        },
     ]
 
     def __init__(self) -> None:
@@ -2175,6 +2189,24 @@ class AgentCore:
                     ),
                 )
         finally:
+            # Best-effort final checkpoint before exit.  The per-tool
+            # checkpoint callback at the Write/Edit success site only
+            # fires after a successful file mutation.  Agents that exit
+            # via max_iterations, convergence_failed, empty_responses,
+            # blocked_execution, or any non-write terminal step would
+            # otherwise leave their last edits uncommitted in the working
+            # tree — and the SWE-bench capture_patch (which uses
+            # ``git diff base_commit..HEAD``) misses uncommitted changes.
+            # See django__django-11400 (24 Apr 2026): agent did real work
+            # per session memory, but predictions.jsonl was empty because
+            # the final exit happened via Bash, not Edit.  Wrapped in
+            # try/except to keep this strictly best-effort: failure here
+            # must not mask the original exit reason.
+            if react_mode and self._checkpoint_callback:
+                try:
+                    await self._checkpoint_callback(ctx)
+                except Exception:
+                    pass
             CURRENT_CONTEXT_TELEMETRY.reset(telemetry_token)
             CURRENT_AGENT_CONTEXT.reset(token)
             try:
