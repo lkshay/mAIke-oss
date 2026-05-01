@@ -13,10 +13,25 @@ typed-tag references (``@file:...``, ``@skill:...``, ``@agent:...``,
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from textual.message import Message
 from textual.widgets import TextArea
+
+
+# ANSI escape sequences that occasionally bleed through to the input when
+# Textual's mouse-event parser misses one (heavy redraw during agent
+# streaming, terminal/version mismatch, etc.).  Without filtering, mouse
+# motion bytes pile up in the user's prompt as visible junk like
+# ``^[[<35;58;39M^[[<35;66;40M…``.  We strip these on every Change event.
+#
+# Matches both real ESC byte (``\x1b[<…``) and the caret-bracket
+# fallback rendering (``^[[<…``) some renderers produce when the byte
+# isn't consumed as an escape.
+_MOUSE_ESC_RE = re.compile(
+    r"(?:\x1b|\^\[)\[<\d+;\d+;\d+[Mm]"
+)
 
 from maike.tui.theme import MAIKE_ACCENT, MAIKE_SECONDARY, MAIKE_WARNING
 from maike.tui.widgets.mention_palette import (
@@ -209,6 +224,15 @@ class PromptInput(TextArea):
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         """Auto-resize height when content changes (e.g. paste)."""
+        # Defensive: strip mouse-tracking escape sequences that bled
+        # through Textual's parser.  ``self.text = cleaned`` retriggers
+        # this handler with the cleaned buffer; the regex won't match
+        # anymore so it terminates after one pass.
+        current = self.text
+        cleaned = _MOUSE_ESC_RE.sub("", current)
+        if cleaned != current:
+            self.text = cleaned
+            return
         self._auto_resize()
         if not self._applying_completion:
             self._refresh_palette()
