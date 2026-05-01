@@ -111,7 +111,7 @@ async def generate_maike_md(
         readme_section=readme_section,
     )
 
-    cost_tracker = CostTracker(budget_usd=1.0)
+    cost_tracker = CostTracker(session_budget_usd=1.0)
     tracer = Tracer()
     gateway = LLMGateway(cost_tracker, tracer, provider_name=provider)
     try:
