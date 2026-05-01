@@ -7,9 +7,9 @@
   <img alt="Status" src="https://img.shields.io/badge/status-alpha-yellow?style=flat-square">
 </p>
 
-<p align="center"><b>A local-first ReAct coding agent with strict tool gating, pre-call cost projection, and persistent project memory.</b></p>
+<p align="center"><b>A ReAct coding agent with strict tool gating, pre-call cost projection, and persistent project memory.</b></p>
 
-<p align="center">Runs Claude, GPT, Gemini, or a local Ollama model. Your code, sessions, cost ledger, and memory never leave your machine.</p>
+<p align="center">Runs Claude, GPT, Gemini, or a local Ollama model. Sessions, cost ledger, and project memory stay on your machine. Hosted-provider API calls send your code to that provider — only Ollama keeps it fully local.</p>
 
 <p align="center">
   <img src="docs/images/tui-demo.gif" alt="mAIke TUI: launch → ask for an Ollama agentic app → Write app.py → Bash run → final response" width="900">
@@ -19,7 +19,7 @@
 
 ## Design
 
-mAIke is built around three convictions: **every API call should be priced *before* it fires**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. Unlike cloud-hosted coding agents that ship your code to a service, or single-provider wrappers around one model API, mAIke runs locally and treats provider choice as a per-session decision. Everything else — sub-agents, the advisor pattern, the eval harness — falls out of those priorities.
+mAIke is built around three convictions: **every API call should be priced *before* it fires**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. The agent process runs on your machine and treats provider choice as a per-session decision; with Ollama, the entire loop stays on-device. Everything else — sub-agents, the eval harness — falls out of those priorities.
 
 ### Features
 
@@ -29,48 +29,34 @@ mAIke is built around three convictions: **every API call should be priced *befo
 - **Read-before-edit enforcement** — the Edit tool refuses to run on a file the agent hasn't Read this turn, killing a whole class of cascading edit bugs.
 - **Auto-memory** — at session end, mAIke distills project overview / key decisions / resolved pitfalls into `.maike/memories/`. The next session starts with that knowledge already in context.
 - **Async sub-agents** — spawn read-only delegates that run in parallel; the main agent collects results with `Delegate(action="check"|"wait")`.
-- **Advisor pattern** — pair a cheap fast executor with a frontier "advisor" that fires only at exploration / first-edit / stuck moments — guidance, not tool calls.
 - **SWE-bench built in** — `maike swe-bench --variant lite|verified|full` runs on real instances with clone caching and resume support.
 - **Threads & worktrees** — multiple concurrent conversations per workspace, isolated git worktrees for branch work.
 - **Extensible** — Skills, Plugins, MCP servers, and LSP language servers as first-class surfaces.
 
-## SWE-bench Verified
+## SWE-bench Verified — early signal
 
-Cold-start eval against [SWE-bench Verified](https://www.swebench.com/verified.html) using the official Docker harness running hidden `FAIL_TO_PASS` tests. **Stratified 48-instance subset** of the 500-instance benchmark (April 2026, models: `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`). Full-set run is in progress.
+Early in-progress eval data, not a leaderboard claim. Cold-start eval against [SWE-bench Verified](https://www.swebench.com/verified.html) using the official Docker harness running hidden `FAIL_TO_PASS` tests. **Stratified 48-instance subset** of the 500-instance benchmark (April 2026, models: `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`).
 
-| Configuration | Resolved | Total cost |
+| Configuration | Resolved on subset | Total cost |
 |---|---|---|
-| **Gemini 3.1 Pro alone** | **25/48 (52.1%)** | $62.93 |
-| **Gemini 3.1 Flash Lite alone** | **9/48 (18.8%)** | $8.25 |
+| Gemini 3.1 Pro alone | 25/48 (52.1%) | $62.93 |
+| Gemini 3.1 Flash Lite alone | 9/48 (18.8%) | $8.25 |
 
 ### By difficulty bucket
 
-The subset is stratified across SWE-bench Verified's `difficulty` annotations.
-
 | Bucket | n | Pro | Flash Lite |
 |---|---|---|---|
-| Easy: `<15min` + `15min–1h` | 36 | **24/36 (66.7%)** | 9/36 (25.0%) |
+| Easy: `<15min` + `15min–1h` | 36 | 24/36 (66.7%) | 9/36 (25.0%) |
 | Hard-tail: `1–4h` + `>4h` | 12 | 1/12 (8.3%) | 0/12 (0%) |
 
-Hard-tail instances make up `25%` of this subset but only `~9%` of full Verified. Reweighted to the full-Verified difficulty distribution, Pro's projected score is in the **mid-60s**.
+Hard-tail instances make up `25%` of this subset but only `~9%` of full Verified, so the subset is biased toward harder cases.
 
-### Where this lands vs published agents (full Verified)
+### What these numbers are and aren't
 
-| Agent | Score |
-|---|---|
-| Claude Code | 80.8% |
-| OpenHands + Claude | 68.4% |
-| Cline | 59.8% |
-| Aider | 52.7% |
-| **mAIke Pro (48-instance subset)** | **52.1%** |
-| Devin 2.0 | 45.8% |
-
-### Caveats — read these before citing
-
-- **48 instances ≠ 500-instance full Verified.** Confidence interval is wide. Full-set projection (mid-60s for Pro) is directional, not measured.
-- **Cold-start, official Docker harness.** No file-name hints, no proxy verifier — same protocol as the published competitors above.
-- **mAIke alone, not advisor-paired.** Advisor mode (cheap executor + frontier-model co-pilot) has a known runaway-trace regression and is excluded from these numbers.
-- **mAIke is alpha**, single-engineer development. The agents above have 1–2 years of dedicated SWE-bench tuning.
+- **They are**: a directional, in-progress signal that the agent + harness produce real (cold-start, FAIL_TO_PASS-verified) fixes on a stratified 48-instance subset.
+- **They are not**: a SWE-bench Verified leaderboard score. A full 500-instance run is on the roadmap; until then, treat as early data.
+- **mAIke is alpha**, single-engineer development. Behaviour, costs, and surface area are still moving.
+- **Numbers are mAIke alone.** The advisor pairing mode (see below) has a known regression and is excluded from this run.
 
 ### Reproduce
 
@@ -278,9 +264,11 @@ For isolated branch work, `maike worktree add/list/remove` wraps `git worktree` 
 
 ---
 
-## Advisor
+## Advisor (alpha — known regression)
 
-Pair a cheap fast executor (e.g. Gemini 3.1 Flash Lite) with a frontier-model **advisor** that fires only at decisive moments — long exploration, repeated failures, before the first edit, before completion.
+> ⚠️ **Status: not currently working.** The advisor pairing mode has a runaway-trace regression that emits multi-GB of trace events on stuck loops in some configurations. The eval results above were run *without* the advisor. Treat this section as a description of the intended design, not a working feature, until the regression is fixed.
+
+The intended design: pair a cheap fast executor (e.g. Gemini 3.1 Flash Lite) with a frontier-model **advisor** that fires only at decisive moments — long exploration, repeated failures, before the first edit, before completion.
 
 ```bash
 # Same-provider pairing (matches the eval above)
