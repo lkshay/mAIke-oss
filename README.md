@@ -93,7 +93,7 @@ This is a personal research project, not a product. The CLI is stable enough for
 - [Cost & Budgets](#cost--budgets)
 - [Tool Safety Model](#tool-safety-model)
 - [Auto-Memory](#auto-memory)
-- [Threads & Worktrees](#threads--worktrees)
+- [Worktrees](#worktrees)
 - [Advisor](#advisor)
 - [Sub-Agents & Delegation](#sub-agents--delegation)
 - [Extensibility](#extensibility)
@@ -150,23 +150,24 @@ maike --provider ollama --model gemma4:26b
 
 ## Interactive Mode
 
-`maike` on its own opens the Textual-based TUI in the current directory.
+`maike` (or equivalently `maike chat`) opens the Textual-based TUI in the current directory. Add `--no-tui` for the legacy text REPL.
 
 ```bash
-maike                                       # defaults
+maike                                       # TUI, defaults
 maike --provider gemini --budget 5.00       # override provider + budget
 maike --yes --verbose                       # auto-approve + inline traces
+maike chat --no-tui                         # legacy text REPL instead of TUI
 ```
 
 | Flag | Purpose |
 |------|---------|
 | `--provider` | `anthropic` / `openai` / `gemini` / `ollama` |
 | `--model` / `-m` | Override the provider default |
-| `--budget` / `-b` | Session budget in USD (default 5.00) |
+| `--budget` / `-b` | Session budget in USD (default 0 = unlimited) |
 | `--yes` / `-y` | Auto-approve tool calls |
 | `--verbose` / `-v` | Stream LLM and tool traces inline |
-| `--new-thread` | Force a brand-new thread |
-| `--thread <id>` | Continue a specific thread |
+| `--no-tui` | Use the legacy text REPL instead of the Textual TUI |
+| `--advisor` | Enable advisor pairing (alpha — see [Advisor section](#advisor-alpha--known-regression)) |
 
 **Inside the TUI**
 
@@ -256,17 +257,17 @@ The next session reads `MEMORY.md` plus the topic files at startup (capped at 8K
 
 ---
 
-## Threads & Worktrees
-
-A workspace can hold many concurrent **threads** — each keeps its own message history, plan, and cost ledger.
-
-```bash
-maike threads                    # list threads
-maike --thread <id>              # continue a specific thread
-maike --new-thread               # force a brand-new thread
-```
+## Worktrees
 
 For isolated branch work, `maike worktree add/list/remove` wraps `git worktree` so an agent can operate on a side branch without touching your main checkout.
+
+```bash
+maike worktree add <name>        # new worktree on a new branch
+maike worktree list              # list mAIke-managed worktrees
+maike worktree remove <name>     # remove a worktree
+```
+
+(Threads — multiple concurrent conversations per workspace — are tracked in the session DB but not yet exposed via dedicated CLI commands. Use `maike history` to inspect past sessions.)
 
 ---
 
@@ -386,19 +387,19 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design decisions behind
 ## CLI Reference
 
 ```bash
-maike                                            # interactive TUI
+maike                                            # interactive TUI (alias of `maike chat`)
+maike chat --no-tui                              # legacy text REPL
 maike setup                                      # write API keys to ~/.config/maike/.env
 maike init                                       # generate MAIKE.md for the current workspace
 maike run <task> [--provider --model --budget --yes]   # one-shot non-interactive
 maike resume <session-id> --workspace <path>     # resume a specific session
-maike threads                                    # list threads in this workspace
 maike cost [<session-id>]                        # cost breakdown
 maike history                                    # workspace session history
-maike eval --suite <all|agentic|hard-agentic|live-repo> [--keep-workspaces]
+maike eval --suite <name> [--keep-workspaces]
 maike swe-bench --variant <lite|verified|full> [--instance-ids ... | --resume FILE]
 maike worktree <add|list|remove> ...             # git worktree management
-maike skill <install|list|remove>
-maike plugin <install|list|remove>
+maike skill install <path-or-url>                # install a skill (no list/remove subcommands yet)
+maike plugin <list|install|enable|disable|update|uninstall|validate> ...
 ```
 
 ---
