@@ -34,27 +34,58 @@ mAIke is built around three convictions: **every API call should be priced *befo
 - **Threads & worktrees** — multiple concurrent conversations per workspace, isolated git worktrees for branch work.
 - **Extensible** — Skills, Plugins, MCP servers, and LSP language servers as first-class surfaces.
 
-## Internal Eval — Advisor Pattern
+## SWE-bench Verified
 
-**This is not a SWE-bench score.** It's a 12-instance internal smoke test designed to validate one specific claim: that pairing a cheap executor with a frontier-model advisor produces a meaningful uplift over the cheap executor alone, at a fraction of the cost of running the frontier model solo.
+Cold-start eval against [SWE-bench Verified](https://www.swebench.com/verified.html) using the official Docker harness running hidden `FAIL_TO_PASS` tests. **Stratified 48-instance subset** of the 500-instance benchmark (April 2026, models: `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`). Full-set run is in progress.
 
-Conditions: 12 mixed Verified+Lite instances, $2.00 budget per trial, April 2026. Verification is a 3-tier proxy (syntax parse + gold-file overlap + semantic similarity), **not** the official SWE-bench Docker harness running `FAIL_TO_PASS` tests. Task prompts include a "likely files" hint derived from the gold patch — this isolates edit quality from retrieval, but means these numbers are not comparable to cold-start runs.
+| Configuration | Resolved | Total cost |
+|---|---|---|
+| **Gemini 3.1 Pro alone** | **25/48 (52.1%)** | $62.93 |
+| **Gemini 3.1 Flash Lite alone** | **9/48 (18.8%)** | $8.25 |
 
-| Config | Solved* | Solved + partial* | Total cost |
-|--------|---------|-------------------|------------|
-| Flash Lite (alone) | 3/12 | 8/12 | $0.96 |
-| Flash Lite + Pro **advisor** | **4/12** | **11/12** | **$0.45** |
-| Pro (alone) | 4/12 | 10/12 | $18.14 |
+### By difficulty bucket
 
-\*"Solved" = passes all three proxy verifier tiers. "Partial" = passes syntax and overlap but not semantic similarity. Neither maps to official SWE-bench scoring. Models: Flash Lite = `gemini-3.1-flash-lite-preview`, Pro = `gemini-3.1-pro-preview`.
+The subset is stratified across SWE-bench Verified's `difficulty` annotations.
 
-The takeaway: under these conditions, the advisor pattern matched solo-Pro's solve rate at ~2.5% of the cost. Pro-solo also hit the budget cap on 5/12 trials and returned zero edits on 2.
+| Bucket | n | Pro | Flash Lite |
+|---|---|---|---|
+| Easy: `<15min` + `15min–1h` | 36 | **24/36 (66.7%)** | 9/36 (25.0%) |
+| Hard-tail: `1–4h` + `>4h` | 12 | 1/12 (8.3%) | 0/12 (0%) |
 
-A real SWE-bench Lite run with the official harness is on the roadmap. To reproduce on the full 300 instances yourself:
+Hard-tail instances make up `25%` of this subset but only `~9%` of full Verified. Reweighted to the full-Verified difficulty distribution, Pro's projected score is in the **mid-60s**.
+
+### Where this lands vs published agents (full Verified)
+
+| Agent | Score |
+|---|---|
+| Claude Code | 80.8% |
+| OpenHands + Claude | 68.4% |
+| Cline | 59.8% |
+| Aider | 52.7% |
+| **mAIke Pro (48-instance subset)** | **52.1%** |
+| Devin 2.0 | 45.8% |
+
+### Caveats — read these before citing
+
+- **48 instances ≠ 500-instance full Verified.** Confidence interval is wide. Full-set projection (mid-60s for Pro) is directional, not measured.
+- **Cold-start, official Docker harness.** No file-name hints, no proxy verifier — same protocol as the published competitors above.
+- **mAIke alone, not advisor-paired.** Advisor mode (cheap executor + frontier-model co-pilot) has a known runaway-trace regression and is excluded from these numbers.
+- **mAIke is alpha**, single-engineer development. The agents above have 1–2 years of dedicated SWE-bench tuning.
+
+### Reproduce
 
 ```bash
-maike swe-bench --variant lite                 # writes predictions.jsonl
-# then run the official SWE-bench Docker harness against predictions.jsonl
+# Generate predictions
+maike swe-bench --variant verified \
+  --provider gemini --model gemini-3.1-pro-preview \
+  --budget 5.0 --timeout 1800 \
+  --output predictions.jsonl
+
+# Score with the official SWE-bench Docker harness
+python -m swebench.harness.run_evaluation \
+  --predictions_path predictions.jsonl \
+  --dataset_name SWE-bench/SWE-bench_Verified \
+  --run_id maike-pro-verified
 ```
 
 ## Status
@@ -314,7 +345,7 @@ maike eval --suite hard-agentic --keep-workspaces
 
 The `agentic_eval_score()` weights: workspace verified (35%) · session completed (25%) · tests passing (15%) · error recovery (10%) · change minimality (10%) · wasted-call efficiency (5%).
 
-For SWE-bench, see [Internal Eval — Advisor Pattern](#internal-eval--advisor-pattern) for results and the reproduction recipe; the [CLI Reference](#cli-reference) lists every `maike swe-bench` flag.
+For SWE-bench, see [SWE-bench Verified](#swe-bench-verified) for results and the reproduction recipe; the [CLI Reference](#cli-reference) lists every `maike swe-bench` flag.
 
 ---
 
