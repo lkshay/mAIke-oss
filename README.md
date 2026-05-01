@@ -17,9 +17,15 @@
 
 ---
 
+## What this is
+
+mAIke is a personal research and learning project — an end-to-end coding agent built to explore specific design questions: pre-call cost projection, risk-tiered tool gating, persistent auto-memory, multi-provider routing, and what a cheap-executor + frontier-advisor pairing can or can't do.
+
+It is **not** trying to compete with Claude Code, Aider, OpenHands, or Devin. The repo is open so the design and the in-progress eval data can be inspected, discussed, copied, and argued with. If something here is useful in your own work, take it.
+
 ## Design
 
-mAIke is built around three convictions: **every API call should be priced *before* it fires**, not reconciled after; **every tool that mutates state should pass through an explicit risk gate** before it runs; and **the project knowledge an agent earns in one session should carry into the next** without re-exploration. The agent process runs on your machine and treats provider choice as a per-session decision; with Ollama, the entire loop stays on-device. Everything else — sub-agents, the eval harness — falls out of those priorities.
+mAIke explores three ideas: every API call should be priced *before* it fires (not reconciled after); every tool that mutates state should pass through an explicit risk gate before it runs; and the project knowledge an agent earns in one session should carry into the next without re-exploration. The agent process runs on your machine and treats provider choice as a per-session decision; with Ollama, the entire loop stays on-device. Everything else — sub-agents, the eval harness — falls out of those questions.
 
 ### Features
 
@@ -76,7 +82,7 @@ python -m swebench.harness.run_evaluation \
 
 ## Status
 
-mAIke is **alpha**. The CLI surface is stabilizing but expect breaking changes. Bug reports welcome via GitHub Issues — see [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+This is a personal research project, not a product. The CLI is stable enough for me to use day-to-day; it is not designed for long-term API stability and will change as I poke at the design questions above. Issues, PRs, and disagreement-with-receipts are all welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) before non-trivial PRs.
 
 ## Table of Contents
 
