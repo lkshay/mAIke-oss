@@ -232,12 +232,12 @@ Every built-in tool carries a `RiskLevel`. The `SafetyLayer` intercepts every to
 
 | Level | Examples | Gate |
 |-------|----------|------|
-| **READ** | `Read`, `Grep`, `SemanticSearch`, `WebSearch`, `WebFetch` | runs freely; READ-safe tools execute in parallel |
+| **READ** | `Read`, `Grep`, `SemanticSearch`, `WebSearch`, `WebFetch` | runs freely; `Grep`, `SemanticSearch`, `WebSearch`, and `WebFetch` execute in parallel |
 | **WRITE** | `Write`, `Edit` | requires a git checkpoint |
 | **EXECUTE** | `Bash` | requires checkpoint + inline approval (skipped with `--yes`) |
 | **DESTRUCTIVE** | `rm -rf`, drop-table style | always prompts; pattern-matched in `safety/rules.py` |
 
-**Read-before-edit:** the Edit tool refuses to run on a file the agent hasn't Read in this turn. The bug class this prevents: an agent reads a file, edits it, then issues a second edit based on its stale recollection of the original contents — silently corrupting the second edit because the line numbers, surrounding context, or assumed state no longer match. After every successful edit the read state clears, forcing a fresh read before the next edit on that file.
+**Read-before-edit:** the Edit tool refuses to run on a file the agent hasn't Read in this turn. The bug class this prevents: an agent edits a file based on stale or hallucinated content after context pruning dropped the original Read — silently corrupting the edit because the line numbers, surrounding context, or assumed state no longer match. After every successful edit mAIke re-reads the file from disk and verifies the result matches what it wrote; the read state is refreshed so consecutive edits on the same file don't need a redundant Read. If verification fails (encoding round-trip, race), the read state is cleared and the next attempt forces a fresh Read.
 
 **Bash idle timeout:** commands are killed if they produce no output for `idle_timeout` seconds (floor 10s). Errors include actionable recovery hints (`use timeout_class="long"` or `background=true`).
 
@@ -309,7 +309,7 @@ Delegate(action="wait", handle="...")
 ```
 
 - **Tool profiles** scope what each delegate type can do — `explore` gets `Read`/`Grep`/`SemanticSearch`/read-only `Bash`; `debug` adds `Edit`; `implement`/`test` get everything.
-- **Result delivery** is inline (up to 3000 chars) — not file pointers — and persisted as `agent_runs` in the session DB.
+- **Result delivery** is inline (up to ~3K tokens / 12,000 chars) — not file pointers — and persisted as `agent_runs` in the session DB.
 - **Auto-resume** waits for *all* running delegates to complete before injecting results in one batch — preventing the parent from re-spawning delegates for already-covered work.
 - `MAX_ASYNC_DELEGATES = 5`. The error message guides the LLM to use `action="wait"` if hit.
 
