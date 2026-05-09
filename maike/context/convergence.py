@@ -42,15 +42,35 @@ def detect_spinning(conversation: list[dict[str, Any]], window: int = 6) -> bool
 
 
 def _outcome_signal(conversation: list[dict[str, Any]], window: int = 10) -> bool:
-    """Detect spinning via high failure rate in recent tool calls."""
+    """Detect spinning via high failure rate in recent tool calls.
+
+    A tool result counts as a failure if either:
+    - ``is_error=True`` (explicit failure), OR
+    - the output starts with ``(no changes)`` — a no-op Edit from a
+      ``success=True`` path that looks like progress to the LLM but is
+      actually a stuck loop.  The Edit tool itself now flags
+      ``old_text == new_text`` as ``is_error=True``, but other tool
+      authors / custom adapters may not, so we backstop here on the
+      output text.
+    """
     results: list[bool] = []
     for message in conversation:
         content = message.get("content")
         if not isinstance(content, list):
             continue
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                results.append(block.get("is_error", False))
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            is_error = bool(block.get("is_error", False))
+            if not is_error:
+                # Backstop: success=True but output is a no-op.  Only
+                # check the leading characters to avoid false positives
+                # on output that mentions "(no changes)" mid-text.
+                raw = block.get("content", "")
+                text = raw if isinstance(raw, str) else str(raw)
+                if text.lstrip().startswith("(no changes)"):
+                    is_error = True
+            results.append(is_error)
     recent = results[-window:]
     if len(recent) < 4:
         return False

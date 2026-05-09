@@ -204,6 +204,33 @@ def register_edit_tools(
         old_text = old_text.replace("\r\n", "\n").replace("\r", "\n")
         new_text = new_text.replace("\r\n", "\n").replace("\r", "\n")
 
+        # No-op edit guard.  When old_text == new_text the agent has
+        # asked to replace text with itself — nothing changes.  Silently
+        # returning success=True (with output "(no changes)") let cheap
+        # models loop indefinitely "fixing" a file by submitting
+        # identical-string edits, e.g. </div> → </div>.  The repeated-
+        # failure tracker can't see it (success=True), and the
+        # convergence outcome-signal can't see it (is_error=False), so
+        # the loop only breaks when iteration cap or wall-time runs out.
+        # Surface this as a real error so both trackers catch it on the
+        # first repeat.
+        if old_text == new_text:
+            return ToolResult(
+                tool_name="edit_file",
+                success=False,
+                output=(
+                    f"old_text and new_text are identical — this edit would "
+                    f"change nothing in {path}.\n\n"
+                    "If you want to make a change, the new_text must differ "
+                    "from old_text.  If you wanted to confirm the file's "
+                    "contents are correct, use Read instead — Edit is for "
+                    "modifications only.  If you're trying to fix a syntax "
+                    "error, re-read the file and identify the actual broken "
+                    "characters before editing."
+                ),
+                error="noop_edit",
+            )
+
         count = content.count(old_text)
 
         if count == 0:

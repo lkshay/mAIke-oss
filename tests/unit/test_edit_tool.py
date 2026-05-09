@@ -156,6 +156,35 @@ def test_edit_file_zero_matches_returns_error():
     assert "old_text not found" in result.output
 
 
+def test_edit_file_noop_old_equals_new_returns_error():
+    """old_text == new_text is a stuck-loop trap — must surface as a failure
+    so RepeatedFailureTracker / convergence detection can see it."""
+    runtime = FakeRuntime()
+    runtime.files["app.py"] = "x = 1\n"
+    registry = ToolRegistry()
+    register_edit_tools(registry, runtime)
+    _mark_read("app.py")
+
+    ctx = _make_ctx()
+    token = CURRENT_AGENT_CONTEXT.set(ctx)
+    try:
+        result = asyncio.run(
+            registry.get("Edit").fn(
+                path="app.py",
+                old_text="x = 1",
+                new_text="x = 1",
+            )
+        )
+    finally:
+        CURRENT_AGENT_CONTEXT.reset(token)
+
+    assert result.success is False
+    assert result.error == "noop_edit"
+    assert "identical" in result.output.lower()
+    # File must be unchanged.
+    assert runtime.files["app.py"] == "x = 1\n"
+
+
 def test_edit_file_multiple_matches_returns_error():
     runtime = FakeRuntime()
     runtime.files["app.py"] = "x = 1\nx = 1\n"

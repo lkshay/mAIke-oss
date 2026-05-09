@@ -93,6 +93,10 @@ _CLASSIFY_CASES: list[tuple[str, str, str, float]] = [
     ("fnf-node", "Error: ENOENT: no such file or directory, open 'config.json'", "file_not_found", 0.9),
     ("fnf-generic", "Error: file not found: /tmp/output.txt", "file_not_found", 0.9),
     ("fnf-path", "Error: path not found: C:\\Users\\test\\file.txt", "file_not_found", 0.9),
+    #
+    # --- noop_edit ---
+    ("noop-message", "old_text and new_text are identical — this edit would change nothing in foo.py", "noop_edit", 0.95),
+    ("noop-error-tag", "noop_edit: agent submitted identical strings", "noop_edit", 0.95),
 ]
 
 

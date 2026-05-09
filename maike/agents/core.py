@@ -437,6 +437,21 @@ class RepeatedFailureTracker:
             ],
             "confidence": 0.95,
         },
+        {
+            # Edit tool received old_text == new_text — the agent submitted
+            # a non-edit (e.g. `</div>` → `</div>`).  Without this category,
+            # gemma4 has been observed looping for 30+ iterations
+            # "fixing" a file by re-submitting identical strings.  See
+            # session 566ce359 (test workspace, 9 May 2026).  Fires on the
+            # first occurrence so the agent gets the structured signal
+            # before iterating again.
+            "category": "noop_edit",
+            "patterns": [
+                re.compile(r"old_text and new_text are identical", re.IGNORECASE),
+                re.compile(r"\bnoop_edit\b", re.IGNORECASE),
+            ],
+            "confidence": 0.98,
+        },
     ]
 
     def __init__(self) -> None:

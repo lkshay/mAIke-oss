@@ -7,6 +7,7 @@ from maike.context.convergence import (
     _extract_contract_items,
     _extract_file_mutations,
     _extract_validation_results,
+    _outcome_signal,
 )
 
 
@@ -72,6 +73,50 @@ class TestDetectSpinning:
             self._tool_use_msg("write_file", "c.py"),
         ]
         assert detect_spinning(conversation, window=6) is True
+
+
+class TestOutcomeSignalNoopBackstop:
+    """`_outcome_signal` must catch no-op edits (success=True, output starts
+    with '(no changes)') as failures.  The Edit tool itself now flags
+    `old_text == new_text` as is_error=True, but this backstop covers
+    other tool authors / custom adapters / older code paths that may
+    still produce a 'success' no-op."""
+
+    @staticmethod
+    def _result(*, is_error: bool, output: str = "ok") -> dict:
+        return {
+            "role": "user",
+            "content": [{"type": "tool_result", "is_error": is_error, "content": output}],
+        }
+
+    def test_noop_results_count_as_failures(self) -> None:
+        # 7 no-op (success=True, "(no changes)") + 3 real successes
+        # = 70% effective failure rate → should fire.
+        conv = [self._result(is_error=False, output="(no changes)\n... rest ...")
+                for _ in range(7)]
+        conv.extend(self._result(is_error=False, output="diff applied")
+                    for _ in range(3))
+        assert _outcome_signal(conv) is True
+
+    def test_real_successes_alone_do_not_fire(self) -> None:
+        conv = [self._result(is_error=False, output="diff applied") for _ in range(10)]
+        assert _outcome_signal(conv) is False
+
+    def test_substring_no_changes_is_not_a_match(self) -> None:
+        # Output containing "(no changes)" mid-text but not at the start
+        # must not be flagged — keeps Bash/grep output that mentions
+        # the phrase in passing from triggering false positives.
+        conv = [self._result(
+            is_error=False,
+            output="echoed: '(no changes)' was the diagnostic message",
+        ) for _ in range(10)]
+        assert _outcome_signal(conv) is False
+
+    def test_explicit_errors_still_fire(self) -> None:
+        # Backstop must not weaken the existing is_error=True path.
+        conv = [self._result(is_error=True, output="boom") for _ in range(7)]
+        conv.extend(self._result(is_error=False) for _ in range(3))
+        assert _outcome_signal(conv) is True
 
 
 class TestExtractFileMutations:
