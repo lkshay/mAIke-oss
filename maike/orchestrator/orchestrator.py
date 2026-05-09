@@ -555,11 +555,8 @@ async def _run_team_member(
     )
     from maike.memory.working import WorkingMemory
     from maike.safety.hooks import SafetyLayer
-    from maike.tools.bash import register_bash_tools
-    from maike.tools.edit import register_edit_tools
-    from maike.tools.filesystem import register_filesystem_tools
+    from maike.tools import register_delegate_default_tools
     from maike.tools.registry import ToolRegistry
-    from maike.tools.search import register_search_tools
 
     task = kwargs.get("task", "")
     context = kwargs.get("context", "")
@@ -586,10 +583,7 @@ async def _run_team_member(
 
     # Build tool registry.
     delegate_registry = ToolRegistry()
-    register_filesystem_tools(delegate_registry, runtime)
-    register_edit_tools(delegate_registry, runtime)
-    register_bash_tools(delegate_registry, runtime)
-    register_search_tools(delegate_registry, runtime)
+    register_delegate_default_tools(delegate_registry, runtime)
 
     if _agent_def and _agent_def.allowed_tools:
         allowed = set(_agent_def.allowed_tools)
@@ -1126,10 +1120,7 @@ class Orchestrator:
                         DELEGATION_TOKEN_BUDGET,
                         model_for_tier,
                     )
-                    from maike.tools.bash import register_bash_tools
-                    from maike.tools.edit import register_edit_tools
-                    from maike.tools.filesystem import register_filesystem_tools
-                    from maike.tools.search import register_search_tools
+                    from maike.tools import register_delegate_default_tools
 
                     delegate_model = model_for_tier(resolved_provider, model_tier)
                     cost_budget = min(
@@ -1156,10 +1147,9 @@ class Orchestrator:
                     )
 
                     delegate_registry = ToolRegistry()
-                    register_filesystem_tools(delegate_registry, runtime, session=self.session_store)
-                    register_edit_tools(delegate_registry, runtime, session=self.session_store)
-                    register_bash_tools(delegate_registry, runtime)
-                    register_search_tools(delegate_registry, runtime)
+                    register_delegate_default_tools(
+                        delegate_registry, runtime, session=self.session_store,
+                    )
 
                     delegate_core = AgentCore(
                         llm_gateway=llm_gateway,
@@ -1881,10 +1871,7 @@ class Orchestrator:
                         DELEGATION_TOKEN_BUDGET,
                         model_for_tier,
                     )
-                    from maike.tools.bash import register_bash_tools
-                    from maike.tools.edit import register_edit_tools
-                    from maike.tools.filesystem import register_filesystem_tools
-                    from maike.tools.search import register_search_tools
+                    from maike.tools import register_delegate_default_tools
 
                     parent_ctx = peek_current_agent_context()
 
@@ -1915,10 +1902,7 @@ class Orchestrator:
                         )
                         # Fork uses parent's registry — skip tool profile filtering.
                         delegate_registry = ToolRegistry()
-                        register_filesystem_tools(delegate_registry, runtime)
-                        register_edit_tools(delegate_registry, runtime)
-                        register_bash_tools(delegate_registry, runtime)
-                        register_search_tools(delegate_registry, runtime)
+                        register_delegate_default_tools(delegate_registry, runtime)
 
                     else:
                         # ── Normal path: resolve custom agent + build fresh context ──
@@ -1939,10 +1923,7 @@ class Orchestrator:
                         delegate_model = model_for_tier(resolved_provider, model_tier)
 
                         delegate_registry = ToolRegistry()
-                        register_filesystem_tools(delegate_registry, runtime)
-                        register_edit_tools(delegate_registry, runtime)
-                        register_bash_tools(delegate_registry, runtime)
-                        register_search_tools(delegate_registry, runtime)
+                        register_delegate_default_tools(delegate_registry, runtime)
 
                         # Apply custom agent tool restrictions.
                         if _agent_def and _agent_def.allowed_tools:
@@ -2053,10 +2034,7 @@ class Orchestrator:
                         MAX_ASYNC_DELEGATES,
                         model_for_tier,
                     )
-                    from maike.tools.bash import register_bash_tools
-                    from maike.tools.edit import register_edit_tools
-                    from maike.tools.filesystem import register_filesystem_tools
-                    from maike.tools.search import register_search_tools
+                    from maike.tools import register_delegate_default_tools
 
                     # Enforce concurrency limit.
                     running = self._async_delegate_manager.running_count
@@ -2133,10 +2111,9 @@ class Orchestrator:
                     )
 
                     delegate_registry = ToolRegistry()
-                    register_filesystem_tools(delegate_registry, runtime, session=self.session_store)
-                    register_edit_tools(delegate_registry, runtime, session=self.session_store)
-                    register_bash_tools(delegate_registry, runtime)
-                    register_search_tools(delegate_registry, runtime)
+                    register_delegate_default_tools(
+                        delegate_registry, runtime, session=self.session_store,
+                    )
 
                     # Apply custom agent tool restrictions.
                     if _agent_def and _agent_def.allowed_tools:

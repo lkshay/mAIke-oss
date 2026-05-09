@@ -20,6 +20,35 @@ if TYPE_CHECKING:
     from maike.agents.skill import SkillLoader
 
 
+def register_delegate_default_tools(
+    registry: ToolRegistry,
+    runtime: ExecutionRuntime,
+    session: SessionStore | None = None,
+) -> ToolRegistry:
+    """Register the standard tool set for delegate sub-agents.
+
+    Mirrors ``register_default_tools`` minus the parent-only handlers
+    (Delegate, Team, Advisor, AskUser, Skill).  Delegates get:
+    Read, Write (filesystem), Edit, Bash, Grep (search),
+    SemanticSearch, WebSearch, WebFetch.
+
+    Crucially WebSearch/WebFetch and SemanticSearch are included — the
+    delegate_explore tool profile lists them in
+    ``AgentCore._DELEGATE_PROFILE_TOOLS``, but the profile filter can
+    only INCLUDE tools that are actually in the registry.  Earlier
+    versions registered just filesystem+edit+bash+search here and the
+    profile filter was effectively a no-op for the web tools, so
+    research delegates would loop on "Tool 'WebSearch' does not exist."
+    """
+    register_filesystem_tools(registry, runtime, session=session)
+    register_edit_tools(registry, runtime, session=session)
+    register_bash_tools(registry, runtime)
+    register_search_tools(registry, runtime)
+    register_semantic_search_tool(registry, runtime)
+    register_web_tools(registry, runtime)
+    return registry
+
+
 def register_default_tools(
     registry: ToolRegistry,
     runtime: ExecutionRuntime,
