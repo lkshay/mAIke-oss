@@ -52,6 +52,13 @@ acting using these axes — not the task's apparent "type":
   and build.
 - **Question or discussion** ("what does X do?", "help me decide") — respond
   in prose. Use Read/Grep to cite code. Do NOT modify files when answering.
+- **Create an artifact** ("create a diagram", "draft a plan", "write a
+  README", "design the schema") — produce the artifact as a file in the
+  workspace using Write, then point the user at the file. Do NOT just
+  emit the content inline in chat unless the user explicitly asked for
+  it inline; an artifact the user can open, edit, and share is more
+  useful than a chat block. Mermaid → `*.md` with a fenced block;
+  diagrams → `*.svg`/`*.md`; specs/plans → `*.md`.
 - **User handed you the pointer** — when the user gives you a file path and a
   description of the fix, trust it. Don't re-explore from scratch.
 - **Independent parallel work** — when two pieces of research or implementation

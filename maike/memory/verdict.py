@@ -66,39 +66,66 @@ _VALID_LABELS: set[str] = {
 }
 
 
-# Tasks that don't expect edits — questions, research, explanations.  When
-# the agent produces output for one of these and makes zero edits, that's
-# the correct outcome, not a "partial".
-_NON_EDIT_LEADING_WORDS: tuple[str, ...] = (
-    "what", "why", "who", "when", "where", "which", "whose", "whom",
-    "how", "is", "are", "do", "does", "did", "can", "could", "should",
-    "would", "will", "explain", "describe", "summarize", "summarise",
-    "tell", "show", "compare", "list", "research", "investigate",
-    "look", "find", "search",
-)
+# Edit-demanding verbs.  When a task starts with one of these, the user
+# expects a file change — 0 successful edits is genuinely partial.
+# Anything NOT on this list is treated as conversationally satisfiable
+# (Q&A, research, draft inline, explain, design on paper, etc.) so a
+# substantive text response counts as `answered` rather than `partial`.
+#
+# We use a blacklist instead of a whitelist because the conversational
+# verb space is open-ended ("create a diagram", "draft a plan", "design
+# the schema", "outline the approach") and a whitelist kept missing
+# legitimate cases (observed: "Create a detailed architectural diagram"
+# → mis-labeled partial despite delivering a complete Mermaid diagram).
+_EDIT_DEMANDING_VERBS: frozenset[str] = frozenset({
+    "fix", "fixup", "patch",
+    "implement", "build",
+    "add", "insert",
+    "edit", "modify", "update", "change", "rename", "rewrite", "replace",
+    "refactor", "restructure", "reorganize", "reorganise",
+    "remove", "delete", "drop", "strip",
+    "install", "uninstall", "upgrade",
+    "deploy", "publish", "release",
+    "migrate", "port",
+    "merge", "rebase", "revert",
+    "commit", "stash",
+    "format", "lint",
+    "wire", "hook",
+    "scaffold", "bootstrap",
+    "configure", "setup", "set",
+    "enable", "disable",
+    "split", "extract",
+    "test", "cover",
+})
 
 
 def _is_non_edit_task(task: str) -> bool:
-    """Return True if the task reads like a question / research request.
+    """Return True if the task is conversationally satisfiable.
 
-    A non-edit task is one where the expected outcome is a written answer,
-    not a code change.  Used by the verdict classifier to avoid labeling
-    a successful Q&A session as "partial — no successful edits".
+    A non-edit task is one where the expected outcome is a written
+    answer (Q&A, research, draft, summary, diagram in markdown), not a
+    code change.  Used by the verdict classifier to avoid labeling a
+    successful conversational session as "partial — no successful edits".
 
-    Heuristic — intentionally conservative.  If unsure, returns False so
-    the regular edits-required logic applies.
+    Heuristic: returns True UNLESS the task starts with an
+    edit-demanding verb (fix/implement/refactor/...).  Blacklist
+    approach because the conversational verb space is open-ended.
     """
     if not task:
         return False
     stripped = task.strip()
     if not stripped:
         return False
-    # Question-mark anywhere in the task is a strong signal.
+    # Question-mark anywhere in the task is a strong "non-edit" signal.
     if "?" in stripped:
         return True
-    # First word from a known interrogative / research starter.
+    # First word: edit-demanding verb → expects a file change → False.
     first = stripped.split(None, 1)[0].lower().strip(".,:;")
-    return first in _NON_EDIT_LEADING_WORDS
+    if first in _EDIT_DEMANDING_VERBS:
+        return False
+    # Default: conversational task.  Includes "create a diagram",
+    # "draft a plan", "explain X", "research Y", "what is Z?", etc.
+    return True
 
 
 @dataclass
