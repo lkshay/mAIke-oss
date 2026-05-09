@@ -502,16 +502,24 @@ class TUIStreamSink:
         is_final = getattr(chunk, "is_final", False)
 
         # The final chunk carries the full accumulated text as text_delta
-        # (not an incremental delta).  Skip it — our buffer already has
-        # the full content from incremental deltas, and appending would
-        # double the text.  The STREAM_DONE signal alone handles the
-        # finalize; do NOT enqueue a final STREAM_DELTA here.  Doing so
-        # used to race with ``_turn_callback`` calling
-        # ``finalize_streaming`` synchronously: the stale DELTA would
-        # drain after the first finalize, create a second streaming
-        # widget, and STREAM_DONE would finalize that — leaving two
-        # copies of the reply in the transcript.
+        # (not an incremental delta).  Skip appending it — our buffer
+        # already has the full content from incremental deltas, and
+        # appending would double the text.
+        #
+        # BUT: throttling (_RENDER_INTERVAL_S) can swallow the trailing
+        # deltas — if the last few tokens arrive within 80ms of the
+        # previous render, no DELTA gets enqueued for them, and going
+        # straight to STREAM_DONE means the user sees a truncated reply
+        # ("We are in the year" instead of "We are in the year 2026.").
+        # So before the final STREAM_DONE, we always emit one last
+        # STREAM_DELTA with the complete buffer.  The order is preserved
+        # by the queue, so STREAM_DONE still finalizes the widget that
+        # now has the full text.
         if is_final:
+            if self._buffer:
+                self._trace_sink._queue.put(
+                    (_Q_STREAM_DELTA, {"text": self._buffer, "render": True})
+                )
             self._trace_sink._queue.put((_Q_STREAM_DONE, {}))
             self._buffer = ""
             self._last_render_time = 0.0

@@ -47,6 +47,7 @@ log = logging.getLogger(__name__)
 VerdictLabel = Literal[
     "satisfied",
     "partial",
+    "answered",
     "unproductive_budget_exhaustion",
     "unproductive_loop",
     "cancelled",
@@ -57,11 +58,47 @@ VerdictLabel = Literal[
 _VALID_LABELS: set[str] = {
     "satisfied",
     "partial",
+    "answered",
     "unproductive_budget_exhaustion",
     "unproductive_loop",
     "cancelled",
     "unknown",
 }
+
+
+# Tasks that don't expect edits — questions, research, explanations.  When
+# the agent produces output for one of these and makes zero edits, that's
+# the correct outcome, not a "partial".
+_NON_EDIT_LEADING_WORDS: tuple[str, ...] = (
+    "what", "why", "who", "when", "where", "which", "whose", "whom",
+    "how", "is", "are", "do", "does", "did", "can", "could", "should",
+    "would", "will", "explain", "describe", "summarize", "summarise",
+    "tell", "show", "compare", "list", "research", "investigate",
+    "look", "find", "search",
+)
+
+
+def _is_non_edit_task(task: str) -> bool:
+    """Return True if the task reads like a question / research request.
+
+    A non-edit task is one where the expected outcome is a written answer,
+    not a code change.  Used by the verdict classifier to avoid labeling
+    a successful Q&A session as "partial — no successful edits".
+
+    Heuristic — intentionally conservative.  If unsure, returns False so
+    the regular edits-required logic applies.
+    """
+    if not task:
+        return False
+    stripped = task.strip()
+    if not stripped:
+        return False
+    # Question-mark anywhere in the task is a strong signal.
+    if "?" in stripped:
+        return True
+    # First word from a known interrogative / research starter.
+    first = stripped.split(None, 1)[0].lower().strip(".,:;")
+    return first in _NON_EDIT_LEADING_WORDS
 
 
 @dataclass
@@ -262,6 +299,7 @@ def classify_heuristic(
     edits_count: int,
     agent_output: str,
     messages: list[dict[str, Any]] | None = None,
+    task: str = "",
 ) -> SessionVerdict:
     """Classify the satisfied-vs-partial split deterministically.
 
@@ -271,6 +309,8 @@ def classify_heuristic(
     - ``edits_count`` (successful Edit/Write calls)
     - ``tool_error_rate`` (fraction of tool calls that errored)
     - Markers in the agent's final natural-language output
+    - ``task`` — used to detect Q&A / research tasks where 0 edits is the
+      correct outcome (a "what year is it?" task has nothing to edit).
 
     Conservative: when signals are ambiguous, defaults to ``partial``.
     The intent is that ``satisfied`` is only awarded when the evidence
@@ -278,11 +318,20 @@ def classify_heuristic(
     """
     output_lower = (agent_output or "").lower()
     err_rate = tool_error_rate(messages or [])
+    has_substantive_output = bool((agent_output or "").strip())
 
     if edits_count == 0:
-        # Shouldn't happen given upstream deterministic short-circuits,
-        # but safe default: edits=0 means the task is not "done" by any
-        # reasonable measure.
+        # Q&A / research tasks expect a written answer, not edits.  If the
+        # agent produced output and the task reads like a question, that's
+        # the correct outcome — label it "answered" instead of "partial".
+        if _is_non_edit_task(task) and has_substantive_output:
+            return SessionVerdict(
+                label="answered",
+                confidence=0.8,
+                rationale="question/research task answered without edits (expected)",
+                source="deterministic",
+            )
+        # No edits and no substantive output → genuine partial.
         return SessionVerdict(
             label="partial",
             confidence=0.6,
@@ -397,6 +446,7 @@ def classify_session(
             edits_count=edits_count,
             agent_output=agent_output,
             messages=messages,
+            task=task,
         )
     except Exception as exc:  # noqa: BLE001 — safety net; never raise
         log.debug("classify_session failed (non-fatal): %s", exc)

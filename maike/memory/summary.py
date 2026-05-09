@@ -320,10 +320,25 @@ class SessionSummaryBuilder:
                 learnings.append(f"Issue resolved: {content}")
 
         # From environment state: capture tech stack details.
+        # Skip the bracketed header line (e.g. "[ENVIRONMENT STATE — ...]")
+        # and the "- Approach: ..." line (which is just the last
+        # design-decision payload re-included for env-reconstruction
+        # purposes — it isn't a durable learning).  Keep concrete
+        # tech-stack signals: Venv, Installed, Versions, Tools.
         if env_state.strip():
-            for line in env_state.strip().splitlines()[:3]:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    learnings.append(f"Environment: {line[:120]}")
+            kept = 0
+            for line in env_state.strip().splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    continue
+                lower = stripped.lstrip("-* ").lower()
+                if lower.startswith("approach:"):
+                    continue
+                learnings.append(f"Environment: {stripped[:120]}")
+                kept += 1
+                if kept >= 3:
+                    break
 
         return learnings

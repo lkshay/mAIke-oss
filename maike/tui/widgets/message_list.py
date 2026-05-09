@@ -412,7 +412,7 @@ class MessageList(VerticalScroll):
             self.mount(self._streaming_widget)
         self._auto_scroll()
 
-    def finalize_streaming(self) -> None:
+    def finalize_streaming(self, *, final_text: str | None = None) -> None:
         """Replace the streaming Static with a selectable Markdown widget.
 
         Streaming renders into a plain-text ``Static`` for cheap
@@ -423,21 +423,31 @@ class MessageList(VerticalScroll):
         mapping — without it, the user's mouse drag can't select the
         assistant's reply, which is the primary copy-to-clipboard path.
 
+        ``final_text`` (optional): authoritative output from the LLMResult.
+        When provided, used in preference to ``_streaming_buffer`` — the
+        buffer can lag behind the model output because the throttle and
+        the queue-drain timer combine to swallow the trailing deltas
+        when ``_turn_callback`` fires synchronously at turn end.  Using
+        the LLM result avoids the truncation ("The current year is" vs
+        "The current year is 2026.") that the buffer-only path produced.
+
         Sets ``_streaming_finalized`` so any stale STREAM_DELTA events
         that drain after this call (queue-drain lag) become no-ops.
         ``begin_streaming_turn`` clears the flag before the next turn.
         """
         self._streaming_finalized = True
         widget = self._streaming_widget
-        if widget is None:
-            self._streaming_buffer = ""
-            return
-        final_text = _clean_agent_output(self._streaming_buffer)
+        # Caller-supplied final_text wins, even if the streaming widget
+        # was never created (some short turns finalize before a delta
+        # ever rendered).
+        text_source = final_text if final_text else self._streaming_buffer
+        cleaned = _clean_agent_output(text_source) if text_source else ""
         self._streaming_buffer = ""
-        self._streaming_widget = None
-        widget.remove()
-        if final_text:
-            self.mount(Markdown(final_text, classes="gutter-msg"))
+        if widget is not None:
+            self._streaming_widget = None
+            widget.remove()
+        if cleaned:
+            self.mount(Markdown(cleaned, classes="gutter-msg"))
             self._auto_scroll()
 
     def begin_streaming_turn(self) -> None:

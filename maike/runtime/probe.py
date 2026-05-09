@@ -76,6 +76,14 @@ class EnvironmentManifest:
             "## Session Info",
             f"Date: {now_local.strftime('%Y-%m-%d')} ({now_local.strftime('%A')})",
             f"Local time: {now_local.strftime('%H:%M %Z')}",
+            (
+                "This date is the PRESENT, not a future target.  When asked "
+                "about \"the current year\" or \"today\", use the date above "
+                "verbatim.  When researching topics that reference this year "
+                "or a recent year, treat them as the current state of the "
+                "world, not a forecast — phrases like \"by 2026\" or "
+                "\"leading into 2026\" are wrong if 2026 is the date above."
+            ),
             f"Platform: {_platform.system()} {_platform.release()}",
             "",
             "## Project Environment",

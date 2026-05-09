@@ -1415,6 +1415,11 @@ class OllamaAdapter(BaseProviderAdapter):
         if system_text:
             messages = [{"role": "system", "content": system_text}, *messages]
         tools = self._convert_tools(request.tools)
+        # stream_options.include_usage asks Ollama (via the OpenAI-compatible
+        # endpoint) to emit a final chunk carrying the prompt/completion
+        # token counts.  Without it, intermediate chunks have no usage
+        # data and the gateway's `final_usage` stays None — leading to
+        # output_tokens=0 in agent_runs metadata.
         stream = await client.chat.completions.create(
             model=request.model,
             messages=messages,
@@ -1422,11 +1427,24 @@ class OllamaAdapter(BaseProviderAdapter):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
         )
         text_parts: list[str] = []
         tool_call_acc: dict[int, dict[str, Any]] = {}
+        last_usage: dict[str, int] | None = None
         async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
+            # The usage-only final chunk has empty `choices` — drain it for
+            # the token counts before the loop's choices[0] access would
+            # IndexError.
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage:
+                last_usage = {
+                    "input_tokens": getattr(chunk_usage, "prompt_tokens", 0) or 0,
+                    "output_tokens": getattr(chunk_usage, "completion_tokens", 0) or 0,
+                }
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
             if delta is None:
                 continue
             # Text delta.
@@ -1445,16 +1463,10 @@ class OllamaAdapter(BaseProviderAdapter):
                         }
                     if tc.function and tc.function.arguments:
                         tool_call_acc[idx]["arguments"] += tc.function.arguments
-            # Usage update.
-            if hasattr(chunk, "usage") and chunk.usage:
-                yield StreamChunk(usage_update={
-                    "input_tokens": chunk.usage.prompt_tokens or 0,
-                    "output_tokens": chunk.usage.completion_tokens or 0,
-                })
-            # Check for finish.
-            finish = chunk.choices[0].finish_reason if chunk.choices else None
-            if finish:
-                break
+            # Check for finish — but keep iterating to drain the trailing
+            # usage chunk that follows when stream_options.include_usage
+            # is set.
+            finish = chunk.choices[0].finish_reason
 
         # Build final tool calls.
         tool_calls: list[dict[str, Any]] = []
@@ -1470,20 +1482,20 @@ class OllamaAdapter(BaseProviderAdapter):
                 "id": acc["id"], "name": acc["name"], "input": parsed_args,
             })
 
-        # Final result.
-        result = LLMResult(
-            provider=self.provider_name.value,
-            content="\n".join(text_parts) if text_parts else None,
-            content_blocks=[
-                LLMContentBlock(type="text", text="\n".join(text_parts))
-            ] if text_parts else [],
-            tool_calls=tool_calls,
-            stop_reason=StopReason.TOOL_USE if tool_calls else StopReason.END_TURN,
-            usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0),
-            latency_ms=0,
-            model=request.model,
+        # Emit usage on the FINAL chunk so the gateway's final_usage gets
+        # populated.  Fall back to a length-based estimate if the server
+        # didn't return usage (shouldn't happen with include_usage=True,
+        # but Ollama versions vary).
+        if last_usage is None:
+            joined = "".join(text_parts)
+            last_usage = {"input_tokens": 0, "output_tokens": max(1, len(joined) // 4) if joined else 0}
+
+        stop_reason_value = (StopReason.TOOL_USE if tool_calls else StopReason.END_TURN).value
+        yield StreamChunk(
+            usage_update=last_usage,
+            is_final=True,
+            stop_reason=stop_reason_value,
         )
-        yield StreamChunk(is_final=True, stop_reason=result.stop_reason.value)
 
     def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert mAIke's block-based message format to Chat Completions format."""

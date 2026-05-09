@@ -74,8 +74,8 @@ class TestToolProfileFiltering:
 
     # Mirror the profiles defined in AgentCore._DELEGATE_PROFILE_TOOLS.
     _PROFILES = {
-        "delegate_explore": frozenset({"Read", "Grep", "SemanticSearch"}),
-        "delegate_plan":    frozenset({"Read", "Grep", "SemanticSearch"}),
+        "delegate_explore": frozenset({"Read", "Grep", "SemanticSearch", "Bash", "WebSearch", "WebFetch"}),
+        "delegate_plan":    frozenset({"Read", "Grep", "SemanticSearch", "WebSearch", "WebFetch"}),
         "delegate_verify":  frozenset({"Read", "Grep", "Bash"}),
         "delegate_review":  frozenset({"Read", "Grep", "Bash"}),
         "delegate_debug":   frozenset({"Read", "Grep", "Bash", "Edit"}),
@@ -84,7 +84,8 @@ class TestToolProfileFiltering:
     _ALL_TOOLS = [
         {"name": "Read"}, {"name": "Write"}, {"name": "Edit"},
         {"name": "Grep"}, {"name": "Bash"}, {"name": "Delegate"},
-        {"name": "SemanticSearch"}, {"name": "WebSearch"}, {"name": "AskUser"},
+        {"name": "SemanticSearch"}, {"name": "WebSearch"}, {"name": "WebFetch"},
+        {"name": "AskUser"},
     ]
 
     def _filter(self, profile: str) -> set[str]:
@@ -93,14 +94,22 @@ class TestToolProfileFiltering:
             return {s["name"] for s in self._ALL_TOOLS if s["name"] in allowed}
         return {s["name"] for s in self._ALL_TOOLS}
 
-    def test_explore_gets_read_only(self):
+    def test_explore_gets_research_toolkit(self):
+        # explore is read-only but DOES get web tools so external research
+        # tasks ("research X in 2026") aren't forced to fabricate from
+        # training data.  Bash is included for read-only commands.
         tools = self._filter("delegate_explore")
-        assert tools == {"Read", "Grep", "SemanticSearch"}
+        assert tools == {"Read", "Grep", "SemanticSearch", "Bash", "WebSearch", "WebFetch"}
         assert "Write" not in tools
-        assert "Bash" not in tools
+        assert "Edit" not in tools
 
-    def test_plan_gets_same_as_explore(self):
-        assert self._filter("delegate_plan") == self._filter("delegate_explore")
+    def test_plan_gets_research_toolkit_minus_bash(self):
+        # plan also gets web tools (architecture decisions often need
+        # external context), but no Bash.
+        tools = self._filter("delegate_plan")
+        assert tools == {"Read", "Grep", "SemanticSearch", "WebSearch", "WebFetch"}
+        assert "Bash" not in tools
+        assert "Write" not in tools
 
     def test_verify_gets_read_plus_bash(self):
         tools = self._filter("delegate_verify")

@@ -2578,8 +2578,21 @@ class Orchestrator:
                 raise
             except Exception as _exc:
                 _err_msg = str(_exc).strip()[:200] or type(_exc).__name__
-                _session_outcome = f"failure — {_err_msg}"
-                await self.session_store.mark_session_status(session.id, "failed")
+                # If the loop already produced a successful agent run, the
+                # error is a finalization or follow-up-turn issue — not a
+                # failure of the substantive work.  Don't poison the
+                # session outcome (and history view) with "failure" when
+                # the user already saw a delivered answer.
+                _had_success = bool(
+                    all_results
+                    and any(getattr(r, "success", False) for r in all_results)
+                )
+                if _had_success:
+                    _session_outcome = f"success — finalization error: {_err_msg}"
+                    await self.session_store.mark_session_status(session.id, "completed")
+                else:
+                    _session_outcome = f"failure — {_err_msg}"
+                    await self.session_store.mark_session_status(session.id, "failed")
                 raise
             finally:
                 # Wait for any in-flight session memory update.

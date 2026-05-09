@@ -483,13 +483,18 @@ class MaikeTUIApp(App):
     async def _turn_callback(self, result: Any) -> str | None:
         ml = self.query_one(MessageList)
         ml.stop_spinner()
-        ml.finalize_streaming()
 
-        # Show extracted output as fallback if streaming didn't capture it.
-        if not self._streaming_shown:
-            agent_output = self._extract_output(result)
-            if agent_output:
-                ml.add_assistant_message(agent_output)
+        # Pull the canonical agent output once and pass it to finalize.
+        # The streaming buffer can lag the actual response (throttle +
+        # 100ms queue-drain lag), so finalizing on the buffer alone
+        # truncates short replies that finish in a single throttle
+        # window.  The LLM result is the authoritative source —
+        # finalize uses it whenever a streaming widget exists, and
+        # mounts it fresh when none does.  This collapses the previous
+        # "two display paths" (streamed + fallback add_assistant_message)
+        # into one, which removes the duplicate-render risk.
+        agent_output = self._extract_output(result)
+        ml.finalize_streaming(final_text=agent_output)
         self._streaming_shown = False
 
         # Enable input and wait for follow-up.

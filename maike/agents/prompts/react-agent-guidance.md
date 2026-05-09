@@ -46,13 +46,19 @@ anchoring its thinking.
 
 | Type | Purpose | Tools | Model |
 |------|---------|-------|-------|
-| `explore` | Codebase research | Read, Grep, SemanticSearch, Bash (read-only) | cheap |
-| `plan` | Design implementation strategy | Read, Grep, SemanticSearch | cheap |
+| `explore` | Codebase OR external research | Read, Grep, SemanticSearch, Bash (read-only), WebSearch, WebFetch | cheap |
+| `plan` | Design implementation strategy | Read, Grep, SemanticSearch, WebSearch, WebFetch | cheap |
 | `implement` | Implement a feature or fix | all | default |
 | `review` | Code review (correctness, security, style) | Read, Grep, Bash | default |
 | `verify` | Adversarial testing (try to break it) | Read, Grep, Bash | default |
 | `debug` | Debugging specialist (fresh perspective) | Read, Grep, Bash, Edit | strong |
 | `test` | Write or extend test suites | all | default |
+
+`explore` covers BOTH codebase exploration and external/web research — it has
+the web tools. For research tasks ("research X in 2026", "look up Y", "find
+information about Z") use `agent_type="explore"` and write a prompt that
+makes clear the answer is on the web, not in the local repo (otherwise the
+delegate may default to Bash/Read on the workspace).
 
 ### Writing the task prompt
 

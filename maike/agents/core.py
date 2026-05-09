@@ -2658,9 +2658,12 @@ class AgentCore:
     _READONLY_ALLOWED_TOOLS = frozenset({"Read", "Grep", "AskUser", "Delegate", "Skill"})
 
     # Delegate sub-agent tool profiles.
+    # explore/plan include WebSearch+WebFetch so research-style delegate
+    # tasks ("research X in 2026", "look up Y") aren't forced to fabricate
+    # answers from training data — they can fetch fresh sources.
     _DELEGATE_PROFILE_TOOLS: dict[str, frozenset[str]] = {
-        "delegate_explore": frozenset({"Read", "Grep", "SemanticSearch", "Bash"}),
-        "delegate_plan":    frozenset({"Read", "Grep", "SemanticSearch"}),
+        "delegate_explore": frozenset({"Read", "Grep", "SemanticSearch", "Bash", "WebSearch", "WebFetch"}),
+        "delegate_plan":    frozenset({"Read", "Grep", "SemanticSearch", "WebSearch", "WebFetch"}),
         "delegate_verify":  frozenset({"Read", "Grep", "Bash"}),
         "delegate_review":  frozenset({"Read", "Grep", "Bash"}),
         "delegate_debug":   frozenset({"Read", "Grep", "Bash", "Edit"}),
